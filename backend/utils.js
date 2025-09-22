@@ -1,4 +1,6 @@
 import { euroImpliedVol76, gbs, gbsLimits } from "./black76.js";
+import { calculateStrategyMetrics } from "./strategyMetrics.js";
+import { calculateMarginRequired } from "./marginCalculator.js";
 
 const mergeTwoArrays = (arr1, arr2) => {
   return [...new Set([...arr1, ...arr2])].sort((a, b) => a - b);
@@ -484,6 +486,23 @@ export const getPayoffData = (builderData) => {
     isIndex
   });
 
+  // Calculate total investment for strategy metrics
+  let totalInvestment = 0;
+  for (const optionLeg of sortedOptionLegs) {
+    const { lots, price, action } = optionLeg;
+    const sign = action === "B" ? -1 : 1; // Buy = cost, Sell = credit
+    totalInvestment += (price * lots * lotSize) * sign;
+  }
+
+  // Calculate strategy metrics
+  const strategyMetrics = calculateStrategyMetrics(payoffs[1], totalInvestment);
+  
+  // Calculate margin required
+  const marginRequired = calculateMarginRequired(optionLegs, lotSize, underlyingPrice);
+  
+  // Add margin to strategy metrics
+  strategyMetrics.marginRequired = marginRequired;
+
   return {
     payoffsAtTarget: payoffs[0],
     payoffsAtExpiry: payoffs[1],
@@ -496,6 +515,7 @@ export const getPayoffData = (builderData) => {
     projectedFuturesPrices: Array.from(
       projectedFuturesPrices, 
       ([expiry, price]) => ({ expiry, price })
-    )
+    ),
+    strategyMetrics
   };
 };

@@ -7,6 +7,7 @@ import { getSBUnderlyingPrice, getSBTargetUnderlyingPrice, getSBTargetDateTime, 
 import { LOTSIZES } from "../../../identifiers";
 import { getUnderlyingType, getActiveOptionLegs, getUTCFromIST } from "../../../utils";
 import PNLChart from "../../Chart/PNLChart";
+import StrategyMetrics from "./StrategyMetrics";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import LineAxisIcon from '@mui/icons-material/LineAxis';
@@ -106,41 +107,53 @@ const PNLVisualizer = () => {
   , [builderData]);
 
   return (
-    <Box sx={{ display: "flex", height: "500px", width: "100%", position: "relative", 
-      borderRadius: "5px", backgroundColor: "background.paper", flexDirection: "column" }}
+    <Box sx={{ display: "flex", width: "100%", position: "relative", 
+      borderRadius: "5px", backgroundColor: "background.paper", flexDirection: "column", gap: 2 }}
     >
-      <Box sx={{ display: "inline-flex", height: "60px", borderBottom: 1, borderBottomColor: "divider",
-        justifyContent: "space-between", alignItems: "center", width: "100%", px: 2, gap: 2 }}>
-        <Typography variant="body2" color="text.primary" sx={{ fontWeight: "bold", fontSize: { xs: "12px", sm: "16px" }}}>Profit & Loss Visualizer</Typography>
-        <Box sx={{ display: "flex", alignItems: "center", columnGap: "20px" }}>
-          <div style={{ display: "inline-flex", columnGap: "10px", alignItems: "center" }}>
-            <div style={{ display: "inline-flex", alignItems: "center" }}>
-              <Box sx={{ width: { xs: "20px", sm: "30px" }, height: { xs: "3px", sm: "4px" }, 
-                backgroundColor: "primary.main", borderRadius: "5px",
-                }} 
-              />
-            </div>
-            <Typography sx={{ fontSize: { xs: "12px", sm: "14px" } }} variant="body2" color="text.primary" component="div">Target</Typography>
-          </div>
-          <div style={{ display: "inline-flex", columnGap: "10px", alignItems: "center" }}>
-            <div style={{ display: "inline-flex", alignItems: "center" }}>
-              <Box sx={{ width: { xs: "10px", sm: "15px" }, height: { xs: "3px", sm: "4px" }, 
-                backgroundColor: "payoffLine.itm", borderTopLeftRadius: "5px",
-                borderBottomLeftRadius: "5px", 
-                }} 
-              />
-              <Box sx={{ width: { xs: "10px", sm: "15px" }, height: { xs: "3px", sm: "4px" }, 
-                backgroundColor: "payoffLine.otm", borderRadius: "5px",
-                borderTopRightRadius: "5px", borderBottomRightRadius: "5px", 
-                }} 
-              />
-            </div>
-            <Typography sx={{ fontSize: { xs: "12px", sm: "14px" } }} variant="body2" color="text.primary" component="div">Expiry</Typography>
-          </div>
+      {/* Strategy Metrics Section */}
+      {activeOptionLegs.length > 0 && builderData?.strategyMetrics && (
+        <Box sx={{ p: 2 }}>
+          <StrategyMetrics metrics={builderData.strategyMetrics} />
         </Box>
-      </Box>
-      <Box sx={{ display: "flex", flex: 1, width: "100%", position: "relative" }}>
-        {content}
+      )}
+      
+      {/* Chart Section */}
+      <Box sx={{ display: "flex", height: "500px", width: "100%", position: "relative", 
+        borderRadius: "5px", backgroundColor: "background.paper", flexDirection: "column" }}
+      >
+        <Box sx={{ display: "inline-flex", height: "60px", borderBottom: 1, borderBottomColor: "divider",
+          justifyContent: "space-between", alignItems: "center", width: "100%", px: 2, gap: 2 }}>
+          <Typography variant="body2" color="text.primary" sx={{ fontWeight: "bold", fontSize: { xs: "12px", sm: "16px" }}}>Profit & Loss Visualizer</Typography>
+          <Box sx={{ display: "flex", alignItems: "center", columnGap: "20px" }}>
+            <div style={{ display: "inline-flex", columnGap: "10px", alignItems: "center" }}>
+              <div style={{ display: "inline-flex", alignItems: "center" }}>
+                <Box sx={{ width: { xs: "20px", sm: "30px" }, height: { xs: "3px", sm: "4px" }, 
+                  backgroundColor: "primary.main", borderRadius: "5px",
+                  }} 
+                />
+              </div>
+              <Typography sx={{ fontSize: { xs: "12px", sm: "14px" } }} variant="body2" color="text.primary" component="div">Target</Typography>
+            </div>
+            <div style={{ display: "inline-flex", columnGap: "10px", alignItems: "center" }}>
+              <div style={{ display: "inline-flex", alignItems: "center" }}>
+                <Box sx={{ width: { xs: "10px", sm: "15px" }, height: { xs: "3px", sm: "4px" }, 
+                  backgroundColor: "payoffLine.itm", borderTopLeftRadius: "5px",
+                  borderBottomLeftRadius: "5px", 
+                  }} 
+                />
+                <Box sx={{ width: { xs: "10px", sm: "15px" }, height: { xs: "3px", sm: "4px" }, 
+                  backgroundColor: "payoffLine.otm", borderRadius: "5px",
+                  borderTopRightRadius: "5px", borderBottomRightRadius: "5px", 
+                  }} 
+                />
+              </div>
+              <Typography sx={{ fontSize: { xs: "12px", sm: "14px" } }} variant="body2" color="text.primary" component="div">Expiry</Typography>
+            </div>
+          </Box>
+        </Box>
+        <Box sx={{ display: "flex", flex: 1, width: "100%", position: "relative" }}>
+          {content}
+        </Box>
       </Box>
     </Box>
   );

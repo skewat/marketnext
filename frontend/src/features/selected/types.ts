@@ -130,6 +130,7 @@ export type BuilderData = {
   underlyingPrice: number;
   targetUnderlyingPrice: number;
   payoffAtTarget: number;
+  strategyMetrics?: StrategyMetrics;
 };
 
 export type OptionLeg = {
@@ -154,3 +155,11 @@ export type TargetUnderlyingPrice = {
 };
 
 export type ActiveOptionLeg = Omit<OptionLeg, "active">;
+
+export type StrategyMetrics = {
+  maxProfit: number;
+  maxLoss: number;
+  pop: number;
+  roi: number;
+  marginRequired: number;
+};
