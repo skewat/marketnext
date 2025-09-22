@@ -162,4 +162,6 @@ export type StrategyMetrics = {
   pop: number;
   roi: number;
   marginRequired: number;
+  isMaxProfitUnlimited: boolean;
+  isMaxLossUnlimited: boolean;
 };

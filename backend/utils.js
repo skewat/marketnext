@@ -491,7 +491,8 @@ export const getPayoffData = (builderData) => {
   for (const optionLeg of sortedOptionLegs) {
     const { lots, price, action } = optionLeg;
     const sign = action === "B" ? -1 : 1; // Buy = cost, Sell = credit
-    totalInvestment += (price * lots * lotSize) * sign;
+    const legInvestment = (price * lots * lotSize) * sign;
+    totalInvestment += legInvestment;
   }
 
   // Calculate strategy metrics
