@@ -11,12 +11,13 @@ import IconButton from '@mui/material/IconButton';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import MenuIcon from '@mui/icons-material/Menu';
-import trendIcon from '../../assets/trend-icon.svg';
+import marketNextLogo from '../../assets/marketnext-logo.png';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Drawer from "@mui/material/Drawer";
 import "@fontsource/exo/400.css";
+import { Box } from "@mui/material";
 
 const Header = () => {
   const dispatch = useDispatch();
@@ -33,20 +34,26 @@ const Header = () => {
     dispatch(setThemeMode(mode));
   };
 
-  const renderLogo = () => {
-    return (
-      <>
-        <Typography color="inherit" component="div" sx={{ height: { xs: "30px", sm: "35px" }, width: { xs: "30px", sm: "35px" }, ml: "10px", mr: "5px" }}>
-          <img src={trendIcon} alt="logo" style={{ height: "100%", width: "100%" }}/>
-        </Typography>
-        <Typography variant="h6" color="inherit" component="div" 
-          sx={{ pr: 1, fontWeight: "bold", color: "text.primary", fontFamily: "Exo", fontSize: { xs: "16px", sm: "18px" } }}
-        >
-          nse-oi-visualizer
-        </Typography>
-      </>
-    );
-  };
+const renderLogo = () => {
+  return (
+    <>
+      {/* SKEWAT - UPDATED VERSION (using Box for cleaner layout, more flexible sizing) */}
+      <Box
+        sx={{
+          width: { xs: 120, sm: 160 }, // responsive width
+          ml: 1,
+          mr: 0.5,
+        }}
+      >
+        <img
+          src={marketNextLogo}
+          alt="MarketNext Logo"
+          style={{ width: "100%", height: "auto", objectFit: "contain" }}
+        />
+      </Box>
+    </>
+  );
+};
 
   const handleChange = (_e: React.SyntheticEvent, newValue: number) => {
     setValue(newValue);
