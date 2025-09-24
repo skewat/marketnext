@@ -6,7 +6,6 @@ import useTheme from "@mui/material/styles/useTheme";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
-import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
@@ -18,6 +17,8 @@ import Tab from '@mui/material/Tab';
 import Drawer from "@mui/material/Drawer";
 import "@fontsource/exo/400.css";
 import { Box } from "@mui/material";
+import Button from '@mui/material/Button';
+import Avatar from '@mui/material/Avatar';
 
 const Header = () => {
   const dispatch = useDispatch();
@@ -29,6 +30,7 @@ const Header = () => {
   const location = useLocation();
   const path = location.pathname;
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  const [authName, setAuthName] = useState<string | null>(null);
 
   const changeThemeMode = (mode: ThemeMode) => {
     dispatch(setThemeMode(mode));
@@ -62,6 +64,8 @@ const renderLogo = () => {
       navigate('/open-interest');
     } else if (newValue === 1) {
       navigate('/strategy-builder');
+    } else if (newValue === 2) {
+      navigate('/scheduler');
     };
   };
 
@@ -70,6 +74,8 @@ const renderLogo = () => {
       setValue(0);
     } else if (path === '/strategy-builder') {
       setValue(1);
+    } else if (path === '/scheduler') {
+      setValue(2);
     };
   }, [path]);
 
@@ -78,6 +84,27 @@ const renderLogo = () => {
       setDrawerOpen(false);
     };
   }, [isLargeScreen]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('authToken');
+    const userStr = localStorage.getItem('authUser');
+    if (token && userStr) {
+      try {
+        const user = JSON.parse(userStr) as { name?: string; email?: string };
+        setAuthName(user?.name || (user?.email ? user.email.split('@')[0] : null));
+      } catch {
+        setAuthName(null);
+      }
+    } else {
+      setAuthName(null);
+    }
+  }, [path]);
+
+  const logout = () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('authUser');
+    setAuthName(null);
+  };
 
   return (
     <AppBar position='fixed' elevation={0} sx={{ backgroundColor: "background.paper", 
@@ -90,9 +117,24 @@ const renderLogo = () => {
           <Tabs value={value} onChange={handleChange}>
             <Tab disableRipple label="Open Interest" sx={{ textTransform: "none", py: 2.9 }} />
             <Tab disableRipple label="Strategy Builder" sx={{ textTransform: "none", py: 2.9 }} />
+            <Tab disableRipple label="Strategy scheduler" sx={{ textTransform: "none", py: 2.9 }} />
           </Tabs>
         </div>}
         <div style={{ display: "inline-flex", flexGrow: 1, flexBasis: 0, alignItems: "center", justifyContent: "flex-end" }}>
+          {authName ? (
+            <Box sx={{ display: 'inline-flex', alignItems: 'center', mr: 1 }}>
+              <Avatar sx={{ width: 28, height: 28, mr: 1, bgcolor: 'success.light', color: 'black' }}>
+                {authName.substring(0, 3).toUpperCase()}
+              </Avatar>
+              <Button size="small" variant="outlined" onClick={logout}>
+                Logout
+              </Button>
+            </Box>
+          ) : (
+            <Button size="small" variant="outlined" sx={{ mr: 1 }} onClick={() => navigate('/login')}>
+              Login
+            </Button>
+          )}
           <IconButton edge="start" color="inherit" aria-label="menu"
             sx={{ color: "text.primary", mx: 1 }}
             onClick={() => changeThemeMode(themeMode === "light" ? "dark" : "light")}
@@ -124,6 +166,7 @@ const renderLogo = () => {
               >
                 <Tab disableRipple label="Open Interest" sx={{ textTransform: "none", py: 2.9 }} />
                 <Tab disableRipple label="Strategy Builder" sx={{ textTransform: "none", py: 2.9 }} />
+                <Tab disableRipple label="Strategy scheduler" sx={{ textTransform: "none", py: 2.9 }} />
               </Tabs>
             </div>
           </Drawer>

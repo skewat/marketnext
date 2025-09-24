@@ -499,7 +499,14 @@ export const getPayoffData = (builderData) => {
   const strategyMetrics = calculateStrategyMetrics(payoffs[1], totalInvestment);
   
   // Calculate margin required
-  const marginRequired = calculateMarginRequired(optionLegs, lotSize, underlyingPrice);
+  // If the strategy has defined risk (no unlimited loss), use max loss as margin requirement.
+  // Otherwise, fall back to an approximate naked margin calculation.
+  let marginRequired = 0;
+  if (strategyMetrics && strategyMetrics.isMaxLossUnlimited === false) {
+    marginRequired = Math.round(Math.abs(strategyMetrics.maxLoss));
+  } else {
+    marginRequired = calculateMarginRequired(optionLegs, lotSize, underlyingPrice);
+  }
   
   // Add margin to strategy metrics
   strategyMetrics.marginRequired = marginRequired;

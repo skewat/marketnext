@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Layout from './components/Layout';
 import OpenInterest from './components/OpenInterest';
 import StrategyBuilder from "./components/StrategyBuilder";
+import Scheduler from "./components/Scheduler";
+import Login from "./components/Auth/Login";
 import ToastContextProvider from "./contexts/ToastContextProvider";
 import Toast from "./components/Common/Toast";
 
@@ -14,6 +16,8 @@ function App() {
           <Route index element={<Navigate to="/open-interest" />} />
           <Route path="open-interest" element={<OpenInterest />} />
           <Route path="strategy-builder" element={<StrategyBuilder />} />
+          <Route path="scheduler" element={<Scheduler />} />
+          <Route path="login" element={<Login />} />
         </Route>
       </Routes>
     </ToastContextProvider>

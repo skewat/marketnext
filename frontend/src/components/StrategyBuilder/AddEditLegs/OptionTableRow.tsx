@@ -51,9 +51,10 @@ type OptionTableRowProps = {
   maxOI: number;
   selectedOptionsInRow: SelectedOptionsInRow;
   numberOfLegs: number;
+  isATM?: boolean;
 };
 
-const OptionTableRow = ({ row, strikePriceATM, maxOI, expiry, selectedOptionsInRow, numberOfLegs }: OptionTableRowProps) => {
+const OptionTableRow = ({ row, strikePriceATM, maxOI, expiry, selectedOptionsInRow, numberOfLegs, isATM }: OptionTableRowProps) => {
   
   const { setToastPack } = useContext(ToastContext);
   const dispatch = useDispatch();
@@ -154,6 +155,7 @@ const OptionTableRow = ({ row, strikePriceATM, maxOI, expiry, selectedOptionsInR
   return (
     <TableRow
       ref={optionTableRowRef}
+      data-atm={isATM ? 'true' : undefined}
       key={row.strike}
       sx={{ '&:last-child td, &:last-child th': { borderBottom: 0 } }}
     >

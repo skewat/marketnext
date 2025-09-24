@@ -2,6 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import UserAgent from 'user-agents';
 import { formatData, getPayoffData } from './utils.js';
+import authRouter from './auth.js';
 
 const baseURL = 'https://www.nseindia.com/';
 
@@ -20,6 +21,8 @@ const getOptionsWithUserAgent = () => {
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({extended: true}));
+// Auth routes
+app.use('/auth', authRouter);
 
 const MAX_RETRY_COUNT = 3;
 
