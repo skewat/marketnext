@@ -1,4 +1,5 @@
 import { useSelector } from 'react-redux';
+import { useEffect, useRef } from 'react';
 import { getSBOptionLegs } from '../../../features/selected/selectedSlice';
 import { type Greeks } from '../../../features/selected/types';
 import Table from '@mui/material/Table';
@@ -49,6 +50,25 @@ const AddEditLegs = ({ rows, expiries, selectedExpiry, onExpiryChange, strikePri
 
   const maxOI = Math.max(maxCallOI, maxPutOI);
 
+  // Ref to the scrollable container so we can auto-scroll ATM into view
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll to the ATM strike when rows / ATM value become available
+  useEffect(() => {
+    if (!strikePriceATM) return;
+    const container = tableContainerRef.current;
+    if (!container) return;
+    // Slight timeout to ensure rows are painted
+    const id = setTimeout(() => {
+      const atmRow = container.querySelector('tr[data-atm="true"]') as HTMLElement | null;
+      if (atmRow) {
+        // Use block:'center' to place ATM roughly middle of view
+        atmRow.scrollIntoView({ block: 'center' });
+      }
+    }, 0);
+    return () => clearTimeout(id);
+  }, [strikePriceATM, rows.length]);
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 0, height: "calc(100dvh - 60px)", p: 0 }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", columnGap: "10px", 
@@ -68,6 +88,7 @@ const AddEditLegs = ({ rows, expiries, selectedExpiry, onExpiryChange, strikePri
       <Box sx={{ display: "flex", maxHeight: "calc(100dvh - 121px)" }}>
         <TableContainer 
           component={Paper}
+          ref={tableContainerRef}
           sx={{ height: "100%" }}
         >
           <Table
@@ -123,6 +144,7 @@ const AddEditLegs = ({ rows, expiries, selectedExpiry, onExpiryChange, strikePri
                     maxOI={maxOI}
                     selectedOptionsInRow={selectedOptionsInRow}
                     numberOfLegs={optionLegs.length}
+                    isATM={strikePriceATM === row.strike}
                   />
                 );
               })}
