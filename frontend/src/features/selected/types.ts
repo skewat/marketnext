@@ -164,4 +164,5 @@ export type StrategyMetrics = {
   marginRequired: number;
   isMaxProfitUnlimited: boolean;
   isMaxLossUnlimited: boolean;
+  breakevenPoints?: number[]; // Underlying prices where payoff at expiry crosses zero
 };
