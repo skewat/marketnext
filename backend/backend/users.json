@@ -1,0 +1,19 @@
+[
+  {
+    "id": "mfwlm2ti",
+    "email": "ss@gmail.com",
+    "phone": "8888888",
+    "passwordHash": "$2a$10$k.rjTspudhCjBeXGMsfWfO5wck/Lyu12mSmhNcdNjP8UWZj7H9lT.",
+    "provider": "local",
+    "createdAt": "2025-09-23T13:36:04.806Z"
+  },
+  {
+    "id": "mfwm37sj",
+    "email": "sss@gmail.com",
+    "phone": "77777777",
+    "passwordHash": "$2a$10$ZgGZW12ys/ZlSzV/2d8FjOQDKI0pudM/WoyoRjXqv96kxSmbZGZ9e",
+    "provider": "local",
+    "name": "Suryakant",
+    "createdAt": "2025-09-23T13:49:24.403Z"
+  }
+]
