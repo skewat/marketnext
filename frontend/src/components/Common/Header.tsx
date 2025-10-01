@@ -117,7 +117,7 @@ const renderLogo = () => {
           <Tabs value={value} onChange={handleChange}>
             <Tab disableRipple label="Open Interest" sx={{ textTransform: "none", py: 2.9 }} />
             <Tab disableRipple label="Strategy Builder" sx={{ textTransform: "none", py: 2.9 }} />
-            <Tab disableRipple label="Strategy scheduler" sx={{ textTransform: "none", py: 2.9 }} />
+            <Tab disableRipple label="Strategy deploy" sx={{ textTransform: "none", py: 2.9 }} />
           </Tabs>
         </div>}
         <div style={{ display: "inline-flex", flexGrow: 1, flexBasis: 0, alignItems: "center", justifyContent: "flex-end" }}>
@@ -166,7 +166,7 @@ const renderLogo = () => {
               >
                 <Tab disableRipple label="Open Interest" sx={{ textTransform: "none", py: 2.9 }} />
                 <Tab disableRipple label="Strategy Builder" sx={{ textTransform: "none", py: 2.9 }} />
-                <Tab disableRipple label="Strategy scheduler" sx={{ textTransform: "none", py: 2.9 }} />
+                <Tab disableRipple label="Strategy deploy" sx={{ textTransform: "none", py: 2.9 }} />
               </Tabs>
             </div>
           </Drawer>
