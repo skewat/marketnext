@@ -149,6 +149,68 @@ const Scheduler = () => {
     setOpen(true);
   };
 
+  // Manual recompute: rebuild legs with latest price/iv and bump target datetime
+  const handleRecalculate = () => {
+    if (!data || !selectedStrategyName || !selectedActualExpiry) {
+      setToastPack(p=>[...p,{ key: Date.now(), type: 'error', message: 'Select a strategy and expiry first' }]);
+      setOpen(true);
+      return;
+    }
+    const { grouped, underlyingValue } = data as any;
+    const g = grouped?.[selectedActualExpiry];
+    const rows = (g?.data || []) as any[];
+    const strikes: number[] = rows.map((r:any) => r.strikePrice || r.strike).filter((v: any)=> typeof v==='number');
+    const fut = g?.syntheticFuturesPrice ?? null;
+    const rowByStrike = new Map<number, any>();
+    for (const r of rows) {
+      const k = (r.strikePrice ?? r.strike) as number;
+      if (typeof k === 'number') rowByStrike.set(k, r);
+    }
+    const saved = (savedMap[selectedStrategyName] || { optionLegs: [] }) as any;
+    const absLegs: OptionLegType[] = [];
+    for (const item of (saved.optionLegs || []) as any[]) {
+      let strike: number | null = null;
+      if (item?.strikeRef?.kind === 'ATM' && fut !== null && strikes.length) {
+        const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-fut) < Math.abs(prev-fut) ? curr : prev, strikes[0]);
+        const atmIdx = Math.max(0, strikes.findIndex(s=>s===nearest));
+        let idx = atmIdx + (item.strikeRef.offset as number);
+        if (idx < 0) idx = 0;
+        if (idx > strikes.length-1) idx = strikes.length-1;
+        strike = strikes[idx];
+      } else if (typeof item?.strike === 'number') {
+        if (strikes.length) {
+          let best = strikes[0]; let bestDiff = Math.abs(best - item.strike);
+          for (const s of strikes){ const d = Math.abs(s - item.strike); if (d < bestDiff){ bestDiff = d; best = s; } }
+          strike = best;
+        } else {
+          strike = item.strike;
+        }
+      }
+      if (strike !== null) {
+        const row = rowByStrike.get(strike);
+        const price = item.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+        const iv = row?.iv ?? null;
+        absLegs.push({
+          active: item.active ?? true,
+          action: item.action,
+          expiry: selectedActualExpiry,
+          strike,
+          type: item.type,
+          lots: item.lots,
+          price,
+          iv,
+        } as OptionLegType);
+      }
+    }
+    // Update SB stores and bump target datetime to trigger recompute
+    dispatch(setSBUnderlyingPrice(underlyingValue));
+    dispatch(setSBOptionLegs({ type: 'set', optionLegs: absLegs } as any));
+    dispatch(setSBExpiry(selectedActualExpiry));
+    dispatch(setSBTargetDateTime({ value: getTargetDateTime().toISOString(), autoUpdate: true } as any));
+    setToastPack(p=>[...p,{ key: Date.now(), type: 'success', message: 'Recalculated with latest prices' }]);
+    setOpen(true);
+  };
+
   // Refresh saved names on underlying change
   useEffect(()=>{
     (async ()=>{
@@ -232,13 +294,18 @@ const Scheduler = () => {
     dispatch(setSBTargetUnderlyingPrice({ value: underlyingValue, autoUpdate: true } as any));
     dispatch(setSBTargetDateTime({ value: getTargetDateTime().toISOString(), autoUpdate: true } as any));
 
-    // Build absolute legs for SB from saved strategy using selected expiry
-  type SavedStrategy = { optionLegs: any[] };
-  const saved = (savedMap[selectedStrategyName] || {}) as SavedStrategy;
+    // Build absolute legs for SB from saved strategy using selected expiry, and inject latest price/iv
+    type SavedStrategy = { optionLegs: any[] };
+    const saved = (savedMap[selectedStrategyName] || {}) as SavedStrategy;
     const g = grouped?.[selectedActualExpiry];
     const rows = (g?.data || []) as any[];
     const strikes: number[] = rows.map(r => r.strikePrice || r.strike).filter((v)=> typeof v==='number');
     const fut = g?.syntheticFuturesPrice ?? null;
+    const rowByStrike = new Map<number, any>();
+    for (const r of rows) {
+      const k = (r.strikePrice ?? r.strike) as number;
+      if (typeof k === 'number') rowByStrike.set(k, r);
+    }
     const absLegs: OptionLegType[] = [];
     for (const item of (saved.optionLegs || []) as any[]) {
       let strike: number | null = null;
@@ -261,6 +328,9 @@ const Scheduler = () => {
         }
       }
       if (strike !== null) {
+        const row = rowByStrike.get(strike);
+        const price = item.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+        const iv = row?.iv ?? null;
         absLegs.push({
           active: item.active ?? true,
           action: item.action,
@@ -268,8 +338,8 @@ const Scheduler = () => {
           strike: strike,
           type: item.type,
           lots: item.lots,
-          price: item.price ?? null,
-          iv: item.iv ?? null,
+          price: price,
+          iv: iv,
         } as OptionLegType);
       }
     }
@@ -429,6 +499,9 @@ const Scheduler = () => {
               <Button variant='contained' color='success' onClick={handleDeploy} disabled={isDeploying || !selectedStrategyName} size='small'>
                 {cfg.deployMode === 'now' ? 'Deploy now' : 'Schedule'}
               </Button>
+            </Grid>
+            <Grid item xs='auto'>
+              <Button variant='outlined' onClick={handleRecalculate} size='small' disabled={!selectedStrategyName || !selectedActualExpiry}>Recalculate</Button>
             </Grid>
             <Grid item xs='auto'>
               <Button variant='outlined' onClick={resetConfig} size='small'>Reset</Button>

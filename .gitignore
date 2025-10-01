@@ -10,6 +10,7 @@ dist/
 # Dependency directories
 /frontend/node_modules/
 /backend/node_modules/
+/Data
 
 # Environment variables
 .env

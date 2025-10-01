@@ -46,5 +46,21 @@
       "trailingEnabled": false
     },
     "id": "1759320395994-wbuhg"
+  },
+  {
+    "name": "SafeBatman",
+    "underlying": "NIFTY",
+    "expiry": "28-Oct-2025",
+    "legs": [],
+    "status": "open",
+    "createdAt": 1759336201692,
+    "exit": {
+      "mode": "onExpiry",
+      "stopLossPct": "1",
+      "stopLossAbs": "",
+      "profitTargetPct": "2",
+      "trailingEnabled": false
+    },
+    "id": "1759336201698-tatbn"
   }
 ]
