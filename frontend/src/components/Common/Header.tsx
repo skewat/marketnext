@@ -66,6 +66,10 @@ const renderLogo = () => {
       navigate('/strategy-builder');
     } else if (newValue === 2) {
       navigate('/scheduler');
+    } else if (newValue === 3) {
+      navigate('/positions');
+    } else if (newValue === 4) {
+      navigate('/trends');
     };
   };
 
@@ -76,6 +80,10 @@ const renderLogo = () => {
       setValue(1);
     } else if (path === '/scheduler') {
       setValue(2);
+    } else if (path === '/positions') {
+      setValue(3);
+    } else if (path === '/trends') {
+      setValue(4);
     };
   }, [path]);
 
@@ -118,6 +126,8 @@ const renderLogo = () => {
             <Tab disableRipple label="Open Interest" sx={{ textTransform: "none", py: 2.9 }} />
             <Tab disableRipple label="Strategy Builder" sx={{ textTransform: "none", py: 2.9 }} />
             <Tab disableRipple label="Strategy deploy" sx={{ textTransform: "none", py: 2.9 }} />
+            <Tab disableRipple label="Positions" sx={{ textTransform: "none", py: 2.9 }} />
+            <Tab disableRipple label="Trend analyses" sx={{ textTransform: "none", py: 2.9 }} />
           </Tabs>
         </div>}
         <div style={{ display: "inline-flex", flexGrow: 1, flexBasis: 0, alignItems: "center", justifyContent: "flex-end" }}>
@@ -167,6 +177,8 @@ const renderLogo = () => {
                 <Tab disableRipple label="Open Interest" sx={{ textTransform: "none", py: 2.9 }} />
                 <Tab disableRipple label="Strategy Builder" sx={{ textTransform: "none", py: 2.9 }} />
                 <Tab disableRipple label="Strategy deploy" sx={{ textTransform: "none", py: 2.9 }} />
+                <Tab disableRipple label="Positions" sx={{ textTransform: "none", py: 2.9 }} />
+                <Tab disableRipple label="Trend analyses" sx={{ textTransform: "none", py: 2.9 }} />
               </Tabs>
             </div>
           </Drawer>

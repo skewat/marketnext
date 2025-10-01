@@ -55,8 +55,6 @@ export const getOptionPriceAndIV = (
   return [0, null];
 };
 
-const STORAGE_KEY = "marketnext.savedStrategies";
-
 type SavedStrategy = {
   name: string;
   underlying: string;
@@ -73,36 +71,20 @@ type SavedOptionLegV2 = Omit<OptionLegType, "strike"> & {
   }
 };
 
-// Root shape: { [underlying: string]: { [name: string]: SavedStrategy } }
-const loadSavedRoot = (): Record<string, Record<string, SavedStrategy>> => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    // Migration: if flat map of name -> strategy, convert to underlying-scoped
-    const firstKey = Object.keys(parsed)[0];
-    const firstVal = firstKey ? parsed[firstKey] : undefined;
-    const isFlat = firstVal && typeof firstVal === 'object' && Array.isArray(firstVal.optionLegs);
-    if (isFlat) {
-      const root = {} as Record<string, Record<string, SavedStrategy>>;
-      for (const name of Object.keys(parsed)) {
-        const strat: SavedStrategy = parsed[name];
-        const u = strat.underlying || 'UNKNOWN';
-        if (!root[u]) root[u] = {};
-        root[u][name] = strat;
-      }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(root));
-      return root;
-    }
-    return parsed;
-  } catch {
-    return {};
-  }
+// Backend-backed storage
+const fetchSavedMap = async (underlying: string): Promise<Record<string, SavedStrategy>> => {
+  const url = (import.meta.env.MODE === 'development' ? '/api' : import.meta.env.VITE_API_BASE_URL) + `/strategies?underlying=${encodeURIComponent(underlying)}`;
+  const res = await fetch(url);
+  if (!res.ok) return {};
+  return await res.json();
 };
-
-const loadSavedMap = (underlying: string): Record<string, SavedStrategy> => {
-  const root = loadSavedRoot();
-  return root[underlying] || {};
+const saveStrategyToServer = async (underlying: string, name: string, strategy: SavedStrategy) => {
+  const url = (import.meta.env.MODE === 'development' ? '/api' : import.meta.env.VITE_API_BASE_URL) + `/strategies`;
+  await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ underlying, name, strategy }) });
+};
+const deleteStrategyOnServer = async (underlying: string, name: string): Promise<Response> => {
+  const url = (import.meta.env.MODE === 'development' ? '/api' : import.meta.env.VITE_API_BASE_URL) + `/strategies?underlying=${encodeURIComponent(underlying)}&name=${encodeURIComponent(name)}`;
+  return await fetch(url, { method: 'DELETE' });
 };
 
 const Strategy = () => {
@@ -119,7 +101,8 @@ const Strategy = () => {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [loadSelected, setLoadSelected] = useState<string>("");
-  const [savedNames, setSavedNames] = useState<string[]>(Object.keys(loadSavedMap(underlying)).sort());
+  const [savedMap, setSavedMap] = useState<Record<string, SavedStrategy>>({});
+  const [savedNames, setSavedNames] = useState<string[]>([]);
   const { data, isFetching, isError } = useOpenInterestQuery({ underlying: underlying });
   const pollIntervalMin = useSelector((s:any)=> s.selected.pollIntervalMin) as 1 | 3 | 5 | 15;
   const filteredExpiries = useDeepMemo(data?.filteredExpiries);
@@ -161,8 +144,14 @@ const Strategy = () => {
     setDrawerOpen((prevState) => !prevState);
   };
 
-  const refreshSavedNames = () => {
-    setSavedNames(Object.keys(loadSavedMap(underlying)).sort());
+  const refreshSavedNames = async () => {
+    try {
+      const map = await fetchSavedMap(underlying);
+      setSavedMap(map);
+      setSavedNames(Object.keys(map).sort());
+    } catch {
+      setSavedMap({}); setSavedNames([]);
+    }
   };
 
   // Convert current legs to ATM-relative offsets for saving
@@ -210,33 +199,23 @@ const Strategy = () => {
     setSaveDialogOpen(true);
   };
 
-  const handleConfirmSave = () => {
+  const handleConfirmSave = async () => {
     const name = saveName.trim();
     if (!name) {
       setToastPack((p) => [...p, { key: Date.now(), type: "error", message: "Enter a strategy name" }]);
       setOpen(true);
       return;
     }
-    const root = loadSavedRoot();
-    if (!root[underlying]) root[underlying] = {};
-    root[underlying][name] = {
-      name,
-      underlying,
-      expiry,
-      version: 2,
-      optionLegs: toSavedLegs(),
-      updatedAt: Date.now(),
-    } as SavedStrategy;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(root));
+    const strat: SavedStrategy = { name, underlying, expiry, version: 2, optionLegs: toSavedLegs(), updatedAt: Date.now() };
+    await saveStrategyToServer(underlying, name, strat);
     setSaveDialogOpen(false);
-    refreshSavedNames();
+    await refreshSavedNames();
     setToastPack((p) => [...p, { key: Date.now(), type: "success", message: `Saved strategy: ${name}` }]);
     setOpen(true);
   };
 
   const handleLoad = (name: string) => {
-    const map = loadSavedMap(underlying);
-    const saved = map[name];
+  const saved = savedMap[name];
     if (!saved) return;
     // Reconstruct legs from ATM-relative offsets if present; fallback to legacy absolute strikes
     const reconstructLegs = (): OptionLegType[] => {
@@ -286,8 +265,7 @@ const Strategy = () => {
 
   // Update list when underlying changes
   useEffect(() => {
-    refreshSavedNames();
-    setLoadSelected("");
+    (async ()=>{ await refreshSavedNames(); setLoadSelected(""); })();
   }, [underlying]);
 
   useEffect(() => {
@@ -463,15 +441,19 @@ const Strategy = () => {
                   if (!loadSelected) return;
                   const ok = window.confirm(`Delete saved strategy '${loadSelected}'?`);
                   if (!ok) return;
-                  const root = loadSavedRoot();
-                  if (root[underlying] && root[underlying][loadSelected]) {
-                    delete root[underlying][loadSelected];
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(root));
-                    setToastPack((p) => [...p, { key: Date.now(), type: 'warning', message: `Deleted strategy: ${loadSelected}` }]);
+                  (async ()=>{
+                    const resp = await deleteStrategyOnServer(underlying, loadSelected);
+                    if (resp.ok) {
+                      setToastPack((p) => [...p, { key: Date.now(), type: 'warning', message: `Deleted strategy: ${loadSelected}` }]);
+                      setLoadSelected("");
+                      await refreshSavedNames();
+                    } else {
+                      let msg = 'Failed to delete strategy';
+                      try { const j = await resp.json(); if (j?.error) msg = j.error; } catch {}
+                      setToastPack((p) => [...p, { key: Date.now(), type: 'error', message: msg }]);
+                    }
                     setOpen(true);
-                  }
-                  setLoadSelected("");
-                  refreshSavedNames();
+                  })();
                 }}
               >
                 <DeleteForeverIcon fontSize="small" />
