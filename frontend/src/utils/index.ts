@@ -111,7 +111,7 @@ export const combineSelectedExpiriesData = (data: TransformedData, expiries: str
         continue;
       };
 
-      if (merged && current) {
+  if (merged && current) {
 
         if (merged.CE && current.CE) {
           merged.CE = mergeAndAddValues(merged.CE, current.CE);
@@ -124,6 +124,13 @@ export const combineSelectedExpiriesData = (data: TransformedData, expiries: str
         if (!merged.CE && current.CE) {
           merged.CE = current.CE;
         };
+
+        // If the initial expiry had missing/zero IV, adopt the first non-zero IV from later expiries
+        if ((merged as any).iv === null || (merged as any).iv === 0) {
+          if ((current as any).iv && (current as any).iv !== 0) {
+            (merged as any).iv = (current as any).iv as number;
+          }
+        }
       };
 
     };
