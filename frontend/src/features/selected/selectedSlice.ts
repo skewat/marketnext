@@ -40,6 +40,7 @@ type SelectedState = {
   strikeDistanceFromATM: StrikeDistancesFromATM;
   nextUpdateAt: string | null;
   strategyBuilder: StrategyBuilder;
+  pollIntervalMin: 1 | 3 | 5 | 15;
 };
 
 const initialState: SelectedState = {
@@ -51,6 +52,7 @@ const initialState: SelectedState = {
   },
   strikeDistanceFromATM: "10",
   nextUpdateAt: null,
+  pollIntervalMin: 3,
   strategyBuilder: {
     expiry: null,
     underlyingPrice: null,
@@ -94,6 +96,9 @@ const selectSlice = createSlice({
     },
     setNextUpdateAt: (state, action: PayloadAction<string>) => {
       state.nextUpdateAt = action.payload;
+    },
+    setPollIntervalMin: (state, action: PayloadAction<1 | 3 | 5 | 15>) => {
+      state.pollIntervalMin = action.payload;
     },
     setSBExpiry: (state, action: PayloadAction<string>) => {
       state.strategyBuilder.expiry = action.payload;
@@ -164,6 +169,7 @@ export const getStrikeRange = (store: RootState) => store.selected.strikeRange;
 export const getStrikeDistanceFromATM = (store: RootState) => store.selected.strikeDistanceFromATM;
 
 export const getNextUpdateAt = (store: RootState) => store.selected.nextUpdateAt;
+export const getPollIntervalMin = (store: RootState) => store.selected.pollIntervalMin;
 
 export const getSBExpiry = (store: RootState) => store.selected.strategyBuilder.expiry;
 
@@ -183,6 +189,6 @@ export const getSBProjectedFuturePrices = (store: RootState) => store.selected.s
 
 export const { setUnderlying, setExpiries, setMinMaxStrike, setStrikeRange, setStrikeDistanceFromATM, setNextUpdateAt, 
   setSBExpiry, setSBOptionLegs, setSBUnderlyingPrice, setSBTargetUnderlyingPrice, setSBTargetDateTime, setSBATMIVsPerExpiry, 
-  setSBFuturesPerExpiry, setSBProjectedFuturePrices } = selectSlice.actions;
+  setSBFuturesPerExpiry, setSBProjectedFuturePrices, setPollIntervalMin } = selectSlice.actions;
 
 export default selectSlice.reducer;

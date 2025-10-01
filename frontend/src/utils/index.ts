@@ -159,9 +159,9 @@ export const getTimeStamp = (date: Date) => {
   return `${hours}:${minutes}`;
 };
 
-export const generateMinuteMarks = () => {
-  const minuteMarks = [];
-  for (let i = 0; i <= 60; i+=3) {
+export const generateMinuteMarks = (stepMin: number = 3) => {
+  const minuteMarks: number[] = [];
+  for (let i = 0; i <= 60; i+= stepMin) {
     minuteMarks.push(i);
   };
 
@@ -172,14 +172,32 @@ export const getCurrentTime = (date: Date) => {
   return getTimeStamp(date);
 };
 
-export const getNextTime = (date: Date) => {
-  const minuteMarks = generateMinuteMarks();
+export const getNextTime = (date: Date, stepMin: number = 3) => {
+  const minuteMarks = generateMinuteMarks(stepMin);
   const currentMinutes = date.getMinutes();
   const nextMinuteMark = minuteMarks.find((mark) => mark > currentMinutes);
   const next = new Date(date);
   next.setMinutes(nextMinuteMark || 0);
   next.setSeconds(0);
   return getTimeStamp(next);
+};
+
+export const isWithinMarketHoursIST = (d: Date = new Date()) => {
+  const local = d.getTime();
+  const tzOffsetMin = d.getTimezoneOffset();
+  const ist = new Date(local + (tzOffsetMin + 330) * 60000);
+  const day = ist.getDay();
+  if (day === 0 || day === 6) return false;
+  const hour = ist.getHours();
+  const minute = ist.getMinutes();
+  const afterOpen = hour > 9 || (hour === 9 && minute >= 15);
+  const beforeClose = hour < 15 || (hour === 15 && minute <= 30);
+  return afterOpen && beforeClose;
+};
+
+export const getNextUpdateDisplay = (date: Date, stepMin: number = 3) => {
+  if (!isWithinMarketHoursIST(date)) return "Market closed";
+  return getNextTime(date, stepMin);
 };
 
 export const haveExpiriesChanged = (currentExpiries: string[], nextExpiries: string[]) => {

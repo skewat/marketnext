@@ -7,7 +7,7 @@ import { getUnderlying, setNextUpdateAt, setSBOptionLegs, getSBOptionLegs, getSB
 } from "../../../features/selected/selectedSlice";
 import { useOpenInterestQuery } from "../../../app/services/openInterest";
 import { type DataItem } from "../../../features/selected/types";
-import { getNearestStrikePrice, getNextTime, getTargetDateTime } from "../../../utils";
+import { getNearestStrikePrice, getNextUpdateDisplay, getTargetDateTime } from "../../../utils";
 import { Box, Typography, Button, Drawer, FormControl, InputLabel, Select, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, Tooltip } from "@mui/material";
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import OptionLeg, { type Leg } from "./OptionLeg";
@@ -61,8 +61,16 @@ type SavedStrategy = {
   name: string;
   underlying: string;
   expiry: string | null;
-  optionLegs: OptionLegType[];
+  version?: 2; // future-proofing; omitted/undefined means legacy absolute-strike saves
+  optionLegs: (OptionLegType | SavedOptionLegV2)[];
   updatedAt: number;
+};
+
+type SavedOptionLegV2 = Omit<OptionLegType, "strike"> & {
+  strikeRef: {
+    kind: "ATM";
+    offset: number; // 0 => ATM, +1 => next strike, -1 => previous strike, etc.
+  }
 };
 
 // Root shape: { [underlying: string]: { [name: string]: SavedStrategy } }
@@ -113,6 +121,7 @@ const Strategy = () => {
   const [loadSelected, setLoadSelected] = useState<string>("");
   const [savedNames, setSavedNames] = useState<string[]>(Object.keys(loadSavedMap(underlying)).sort());
   const { data, isFetching, isError } = useOpenInterestQuery({ underlying: underlying });
+  const pollIntervalMin = useSelector((s:any)=> s.selected.pollIntervalMin) as 1 | 3 | 5 | 15;
   const filteredExpiries = useDeepMemo(data?.filteredExpiries);
   const rows = (data && expiry) ? formatData(data.grouped[expiry]?.data || []) : [];
 
@@ -156,6 +165,46 @@ const Strategy = () => {
     setSavedNames(Object.keys(loadSavedMap(underlying)).sort());
   };
 
+  // Convert current legs to ATM-relative offsets for saving
+  const toSavedLegs = (): (OptionLegType | SavedOptionLegV2)[] => {
+    if (!data) return optionLegs; // fallback to absolute if data not ready
+    const out: (OptionLegType | SavedOptionLegV2)[] = [];
+    for (const leg of optionLegs) {
+      const g = data.grouped[leg.expiry];
+      const strikesForExpiry = formatData(g?.data || []).map(r => r.strike);
+      const futPrice = g?.syntheticFuturesPrice ?? null;
+      if (!strikesForExpiry.length || futPrice === null) {
+        out.push(leg); // fallback to absolute
+        continue;
+      }
+      const atmStrike = getNearestStrikePrice(strikesForExpiry, futPrice);
+      const atmIdx = Math.max(0, strikesForExpiry.findIndex(s => s === atmStrike));
+      let legIdx = strikesForExpiry.findIndex(s => s === leg.strike);
+      if (legIdx < 0) {
+        let bestIdx = 0;
+        let bestDiff = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < strikesForExpiry.length; i++) {
+          const diff = Math.abs(strikesForExpiry[i] - leg.strike);
+          if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+        }
+        legIdx = bestIdx;
+      }
+      const offset = legIdx - atmIdx;
+      const saved: SavedOptionLegV2 = {
+        active: leg.active,
+        action: leg.action,
+        expiry: leg.expiry,
+        strikeRef: { kind: "ATM", offset },
+        type: leg.type,
+        lots: leg.lots,
+        price: leg.price,
+        iv: leg.iv,
+      };
+      out.push(saved);
+    }
+    return out;
+  };
+
   const handleOpenSave = () => {
     setSaveName("");
     setSaveDialogOpen(true);
@@ -174,7 +223,8 @@ const Strategy = () => {
       name,
       underlying,
       expiry,
-      optionLegs,
+      version: 2,
+      optionLegs: toSavedLegs(),
       updatedAt: Date.now(),
     } as SavedStrategy;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(root));
@@ -188,8 +238,47 @@ const Strategy = () => {
     const map = loadSavedMap(underlying);
     const saved = map[name];
     if (!saved) return;
+    // Reconstruct legs from ATM-relative offsets if present; fallback to legacy absolute strikes
+    const reconstructLegs = (): OptionLegType[] => {
+      const legs: OptionLegType[] = [];
+      const list = saved.optionLegs || [];
+      for (const item of list as any[]) {
+        if (item && item.strikeRef && item.strikeRef.kind === "ATM") {
+          const { expiry } = item as SavedOptionLegV2;
+          const g = data?.grouped?.[expiry];
+          const strikesForExpiry = formatData(g?.data || []).map(r => r.strike);
+          const futPrice = g?.syntheticFuturesPrice ?? null;
+          if (!strikesForExpiry.length || futPrice === null) {
+            // Can't reconstruct; skip this leg
+            continue;
+          }
+          const atmStrike = getNearestStrikePrice(strikesForExpiry, futPrice);
+          const atmIdx = Math.max(0, strikesForExpiry.findIndex(s => s === atmStrike));
+          let idx = atmIdx + (item.strikeRef.offset as number);
+          if (idx < 0) idx = 0;
+          if (idx > strikesForExpiry.length - 1) idx = strikesForExpiry.length - 1;
+          const strike = strikesForExpiry[idx];
+          const leg: OptionLegType = {
+            active: item.active,
+            action: item.action,
+            expiry: item.expiry,
+            strike,
+            type: item.type,
+            lots: item.lots,
+            price: item.price ?? null,
+            iv: item.iv ?? null,
+          };
+          legs.push(leg);
+        } else {
+          // Legacy format includes absolute strike
+          legs.push(item as OptionLegType);
+        }
+      }
+      return legs;
+    };
+    const loadedLegs = reconstructLegs();
     // Load option legs and expiry; keep underlying as-is to avoid cross-instrument mismatch surprises
-    dispatch(setSBOptionLegs({ type: "set", optionLegs: saved.optionLegs }));
+    dispatch(setSBOptionLegs({ type: "set", optionLegs: loadedLegs }));
     if (saved.expiry) dispatch(setSBExpiry(saved.expiry));
     setToastPack((p) => [...p, { key: Date.now(), type: "info", message: `Loaded strategy: ${name}` }]);
     setOpen(true);
@@ -203,11 +292,11 @@ const Strategy = () => {
 
   useEffect(() => {
     if (!isFetching && !isError) {
-      const now = new Date();
-      const nextTime = getNextTime(now);
+  const now = new Date();
+  const nextTime = getNextUpdateDisplay(now, pollIntervalMin);
       dispatch(setNextUpdateAt(nextTime));
     };
-  }, [isFetching, isError]);
+  }, [isFetching, isError, pollIntervalMin]);
 
   useEffect(() => {
     if (data && memoizedOptionLegs) {

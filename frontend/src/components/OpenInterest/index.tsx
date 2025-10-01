@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useTheme from "@mui/material/styles/useTheme";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useDispatch, useSelector } from "react-redux";
@@ -6,7 +6,7 @@ import { useOpenInterestQuery, openInterestApi } from "../../app/services/openIn
 import { type AppDispatch } from "../../store";
 import { getUnderlying, getExpiries, setExpiries, getStrikeRange, getStrikeDistanceFromATM, 
   setMinMaxStrike, setNextUpdateAt } from "../../features/selected/selectedSlice";
-import { getMinAndMaxStrikePrice, getNextTime } from "../../utils";
+import { getMinAndMaxStrikePrice, getNextUpdateDisplay } from "../../utils";
 import useDeepMemo from "../../hooks/useDeepMemo";
 import Box from "@mui/material/Box";
 import Grid from "@mui/material/Grid";
@@ -24,9 +24,11 @@ const OpenInterest = () => {
   const strikeRange = useSelector(getStrikeRange);
   const strikeDistanceFromATM = useSelector(getStrikeDistanceFromATM);
   const { data, isFetching, isError } = useOpenInterestQuery({ underlying: underlying });
+  const pollIntervalMin = useSelector((s:any)=> s.selected.pollIntervalMin) as 1 | 3 | 5 | 15;
   const filteredExpiries = useDeepMemo(data?.filteredExpiries);
   const allExpiries = useDeepMemo(data?.allExpiries);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
     if (isLargeScreen) {
@@ -61,29 +63,38 @@ const OpenInterest = () => {
   }, [allExpiries, filteredExpiries]);
 
   useEffect(() => {
-    const IntervalWorker: Worker = new Worker(new URL("../../worker/IntervalWorker.ts", import.meta.url));
-    IntervalWorker.postMessage({ action: "start" });
-    IntervalWorker.onmessage = (e: MessageEvent) => {
+    const w: Worker = new Worker(new URL("../../worker/IntervalWorker.ts", import.meta.url));
+    workerRef.current = w;
+    w.postMessage({ action: "start", intervalMin: pollIntervalMin });
+    w.onmessage = (e: MessageEvent) => {
       if (e.data === "get-oi") {
-        console.log("getting oi data");
         dispatch(openInterestApi.util.invalidateTags(["OpenInterest"]));
-      };
+      }
     };
 
     return () => {
-      console.log("terminating worker");
-      IntervalWorker.terminate();
+      if (workerRef.current) {
+        workerRef.current.postMessage({ action: "stop" });
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
     };
-
   }, [underlying]);
+
+  // Push interval updates to the worker without recreating it
+  useEffect(() => {
+    if (workerRef.current) {
+      workerRef.current.postMessage({ action: "update-interval", intervalMin: pollIntervalMin });
+    }
+  }, [pollIntervalMin]);
 
   useEffect(() => {
     if (!isFetching && !isError) {
       const now = new Date();
-      const nextTime = getNextTime(now);
+      const nextTime = getNextUpdateDisplay(now, pollIntervalMin);
       dispatch(setNextUpdateAt(nextTime));
     };
-  }, [isFetching, isError]);
+  }, [isFetching, isError, pollIntervalMin]);
 
   return (
     <>
