@@ -1,0 +1,50 @@
+[
+  {
+    "name": "test3",
+    "underlying": "NIFTY",
+    "expiry": "28-Oct-2025",
+    "legs": [],
+    "status": "closed",
+    "createdAt": 1759311764663,
+    "exit": {
+      "mode": "onExpiry",
+      "stopLossPct": "1",
+      "stopLossAbs": "",
+      "profitTargetPct": "2",
+      "trailingEnabled": false
+    },
+    "id": "1759311764668-mmtp2"
+  },
+  {
+    "name": "test3",
+    "underlying": "NIFTY",
+    "expiry": "25-Nov-2025",
+    "legs": [],
+    "status": "closed",
+    "createdAt": 1759311789716,
+    "exit": {
+      "mode": "onExpiry",
+      "stopLossPct": "1",
+      "stopLossAbs": "",
+      "profitTargetPct": "2",
+      "trailingEnabled": false
+    },
+    "id": "1759311789723-hwy3e"
+  },
+  {
+    "name": "SafeBatman",
+    "underlying": "NIFTY",
+    "expiry": "28-Oct-2025",
+    "legs": [],
+    "status": "closed",
+    "createdAt": 1759320395989,
+    "exit": {
+      "mode": "onExpiry",
+      "stopLossPct": "1",
+      "stopLossAbs": "",
+      "profitTargetPct": "2",
+      "trailingEnabled": false
+    },
+    "id": "1759320395994-wbuhg"
+  }
+]

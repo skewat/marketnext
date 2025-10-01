@@ -1,0 +1,154 @@
+{
+  "NIFTY": {
+    "test3": {
+      "name": "test3",
+      "underlying": "NIFTY",
+      "expiry": "07-Oct-2025",
+      "version": 2,
+      "optionLegs": [
+        {
+          "active": true,
+          "action": "B",
+          "expiry": "07-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": -1
+          },
+          "type": "CE",
+          "lots": 1,
+          "price": 113,
+          "iv": 0.07690439068002168
+        },
+        {
+          "active": true,
+          "action": "B",
+          "expiry": "07-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": -1
+          },
+          "type": "PE",
+          "lots": 1,
+          "price": 84.35,
+          "iv": 0.07690439068002168
+        },
+        {
+          "active": true,
+          "action": "S",
+          "expiry": "07-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": -7
+          },
+          "type": "PE",
+          "lots": 2,
+          "price": 20.55,
+          "iv": 0.0941655187326329
+        },
+        {
+          "active": true,
+          "action": "S",
+          "expiry": "07-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": 5
+          },
+          "type": "CE",
+          "lots": 2,
+          "price": 15.4,
+          "iv": 0.07453694237215315
+        }
+      ],
+      "updatedAt": 1759310701367,
+      "type": "default"
+    },
+    "SafeBatman": {
+      "name": "SafeBatman",
+      "underlying": "NIFTY",
+      "expiry": "28-Oct-2025",
+      "version": 2,
+      "optionLegs": [
+        {
+          "active": true,
+          "action": "B",
+          "expiry": "28-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": -9
+          },
+          "type": "PE",
+          "lots": 1,
+          "price": 111.85,
+          "iv": 0.10282648729592189
+        },
+        {
+          "active": true,
+          "action": "B",
+          "expiry": "28-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": 6
+          },
+          "type": "CE",
+          "lots": 1,
+          "price": 118,
+          "iv": 0.08950413854433935
+        },
+        {
+          "active": true,
+          "action": "S",
+          "expiry": "28-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": -14
+          },
+          "type": "PE",
+          "lots": 3,
+          "price": 66.6,
+          "iv": 0.1078383302700956
+        },
+        {
+          "active": true,
+          "action": "S",
+          "expiry": "28-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": 10
+          },
+          "type": "CE",
+          "lots": 3,
+          "price": 68,
+          "iv": 0.08907800083580501
+        },
+        {
+          "active": true,
+          "action": "B",
+          "expiry": "28-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": 20
+          },
+          "type": "CE",
+          "lots": 2,
+          "price": 16.5,
+          "iv": 0.0937991558842262
+        },
+        {
+          "active": true,
+          "action": "B",
+          "expiry": "28-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": -28
+          },
+          "type": "PE",
+          "lots": 2,
+          "price": 17.35,
+          "iv": 0.12705581578450717
+        }
+      ],
+      "updatedAt": 1759319982305,
+      "type": "user"
+    }
+  }
+}
