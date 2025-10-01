@@ -97,6 +97,40 @@ const Scheduler = () => {
     return res.json();
   };
 
+  // Build absolute legs for current selection using OI snapshot
+  const buildLegsForSelected = (): OptionLegType[] => {
+    const d: any = data;
+    if (!d || !selectedStrategyName || !selectedActualExpiry) return [];
+    const grouped = d.grouped;
+    const g = grouped?.[selectedActualExpiry];
+    const rows = (g?.data || []) as any[];
+    const strikes: number[] = rows.map((r:any)=> r.strikePrice || r.strike).filter((v:any)=> typeof v==='number');
+    const fut = g?.syntheticFuturesPrice ?? null;
+    const rowByStrike = new Map<number, any>();
+    for (const r of rows) { const k = (r.strikePrice ?? r.strike) as number; if (typeof k === 'number') rowByStrike.set(k, r); }
+    const saved = (savedMap[selectedStrategyName] || { optionLegs: [] }) as any;
+    const legs: OptionLegType[] = [];
+    for (const item of (saved.optionLegs || []) as any[]) {
+      let strike: number | null = null;
+      if (item?.strikeRef?.kind === 'ATM' && fut !== null && strikes.length) {
+        const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-fut) < Math.abs(prev-fut) ? curr : prev, strikes[0]);
+        const atmIdx = Math.max(0, strikes.findIndex((s:number)=>s===nearest));
+        let idx = atmIdx + (item.strikeRef.offset as number);
+        if (idx < 0) idx = 0; if (idx > strikes.length-1) idx = strikes.length-1;
+        strike = strikes[idx];
+      } else if (typeof item?.strike === 'number') {
+        if (strikes.length) { let best = strikes[0]; let bestDiff = Math.abs(best - item.strike); for (const s of strikes){ const d = Math.abs(s - item.strike); if (d < bestDiff){ bestDiff = d; best = s; } } strike = best; } else { strike = item.strike; }
+      }
+      if (strike !== null) {
+        const row = rowByStrike.get(strike);
+        const price = item.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+        const iv = row?.iv ?? null;
+        legs.push({ active: item.active ?? true, action: item.action, expiry: selectedActualExpiry, strike, type: item.type, lots: item.lots, price, iv } as OptionLegType);
+      }
+    }
+    return legs;
+  };
+
   const handleDeploy = async ()=> {
     if (!selectedStrategyName) {
       setToastPack(p=>[...p,{key:Date.now(),type:'error',message:'Select a saved strategy to deploy'}]); setOpen(true); return;
@@ -118,11 +152,7 @@ const Scheduler = () => {
       setIsDeploying(true);
       setToastPack(p=>[...p,{key:Date.now(),type:'info',message:`Scheduled deploy: ${selectedStrategyName} on ${cfg.deployDay} at ${cfg.deployTime}`}]);
       try {
-        const legs = (function(){
-          // Use SB legs currently derived for preview/chart
-          const sb = (window as any).__reduxStore?.getState?.()?.selected?.strategyBuilder?.optionLegs;
-          return Array.isArray(sb) ? sb : [];
-        })();
+        const legs = buildLegsForSelected();
         await postPosition({ name: selectedStrategyName, underlying, expiry, legs, status: 'scheduled', createdAt: Date.now(), schedule: { day: cfg.deployDay!, time: cfg.deployTime! }, exit: { mode: (cfg.exitMode||'onExpiry') as any, stopLossPct: cfg.stopLossPct, stopLossAbs: cfg.stopLossAbs, profitTargetPct: cfg.profitTargetPct, trailingEnabled: cfg.trailingEnabled } });
       } catch (e) {
         setToastPack(p=>[...p,{key:Date.now(),type:'error',message:'Failed to schedule position'}]);
@@ -136,10 +166,7 @@ const Scheduler = () => {
     setToastPack(p=>[...p,{key:Date.now(),type:'success',message:`Deploying now: ${selectedStrategyName}`}]);
     // Save as an open position to backend
     try {
-      const legs = (function(){
-        const sb = (window as any).__reduxStore?.getState?.()?.selected?.strategyBuilder?.optionLegs;
-        return Array.isArray(sb) ? sb : [];
-      })();
+      const legs = buildLegsForSelected();
       await postPosition({ name: selectedStrategyName, underlying, expiry, legs, status: 'open', createdAt: Date.now(), exit: { mode: (cfg.exitMode||'onExpiry') as any, stopLossPct: cfg.stopLossPct, stopLossAbs: cfg.stopLossAbs, profitTargetPct: cfg.profitTargetPct, trailingEnabled: cfg.trailingEnabled } });
     } catch (e) {
       setToastPack(p=>[...p,{key:Date.now(),type:'error',message:'Failed to deploy position'}]);

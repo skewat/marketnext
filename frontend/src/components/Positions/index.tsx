@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useContext } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Box, Paper, Typography, Grid, FormControl, InputLabel, Select, MenuItem, Button, Drawer } from '@mui/material';
-import { getUnderlying, setSBATMIVsPerExpiry, setSBFuturesPerExpiry, setSBUnderlyingPrice, setSBTargetUnderlyingPrice, setSBTargetDateTime, setSBOptionLegs, setSBExpiry } from '../../features/selected/selectedSlice';
+import { getUnderlying, setUnderlying as setGlobalUnderlying, setSBATMIVsPerExpiry, setSBFuturesPerExpiry, setSBUnderlyingPrice, setSBTargetUnderlyingPrice, setSBTargetDateTime, setSBOptionLegs, setSBExpiry } from '../../features/selected/selectedSlice';
 import { useOpenInterestQuery } from '../../app/services/openInterest';
 import PNLVisualizer from '../StrategyBuilder/PNLVisualizer';
 import { getTargetDateTime } from '../../utils';
@@ -34,6 +34,13 @@ const patchPosition = async (id: string, patch: Partial<Position>): Promise<Posi
   if (!res.ok) return null;
   return await res.json();
 };
+const fetchSavedStrategiesMap = async (underlying: string): Promise<Record<string, any>> => {
+  try {
+    const res = await fetch(`${apiBase}/strategies?underlying=${encodeURIComponent(underlying)}`);
+    if (!res.ok) return {};
+    return await res.json();
+  } catch { return {}; }
+};
 
 const Positions = () => {
   const dispatch = useDispatch();
@@ -50,12 +57,21 @@ const Positions = () => {
 
   useEffect(()=>{ (async ()=>{ setPositions(await fetchPositions(underlying)); })(); }, [underlying]);
 
+  // Ensure the app underlying matches the selected position's underlying
+  useEffect(() => {
+    if (!selectedId) return;
+    const pos = positions.find(p => p.id === selectedId);
+    if (pos && pos.underlying !== underlying) {
+      dispatch(setGlobalUnderlying(pos.underlying as any));
+    }
+  }, [selectedId]);
+
   // On select, feed SB state and render PNLVisualizer
   useEffect(()=>{
     if (!selectedId || !data) return;
     const pos = filtered.find(p => p.id === selectedId);
     if (!pos) return;
-    const { grouped, underlyingValue } = data as any;
+  const { grouped, underlyingValue } = data as any;
     const atmIVsPerExpiry: { [k:string]: number } = {};
     const futuresPerExpiry: { [k:string]: number } = {};
     Object.keys(grouped||{}).forEach(k => { atmIVsPerExpiry[k] = grouped[k]?.atmIV || 0; futuresPerExpiry[k] = grouped[k]?.syntheticFuturesPrice || 0; });
@@ -64,8 +80,74 @@ const Positions = () => {
     dispatch(setSBFuturesPerExpiry(futuresPerExpiry as any));
     dispatch(setSBTargetUnderlyingPrice({ value: underlyingValue, autoUpdate: true } as any));
     dispatch(setSBTargetDateTime({ value: getTargetDateTime().toISOString(), autoUpdate: true } as any));
-    dispatch(setSBOptionLegs({ type: 'set', optionLegs: pos.legs } as any));
-    dispatch(setSBExpiry(pos.expiry));
+  // Resolve expiry: use position expiry if available else the first available expiry
+  const availableExpiries = Object.keys(grouped || {});
+  const useExpiry = availableExpiries.includes(pos.expiry) ? pos.expiry : (availableExpiries[0] || pos.expiry);
+    // Rebuild legs with latest price/iv and nearest strike mapping for the saved expiry.
+    (async () => {
+      const g = grouped?.[useExpiry];
+      const rows = (g?.data || []) as any[];
+      const strikes: number[] = rows.map((r:any) => r.strikePrice || r.strike).filter((v:any)=> typeof v==='number');
+      const fut = g?.syntheticFuturesPrice ?? null;
+      const atmBase = (fut ?? g?.atmStrike ?? underlyingValue ?? null) as number | null;
+      const rowByStrike = new Map<number, any>();
+      for (const r of rows) {
+        const k = (r.strikePrice ?? r.strike) as number;
+        if (typeof k === 'number') rowByStrike.set(k, r);
+      }
+      let legsSource: OptionLegType[] = pos.legs || [];
+      // Fallback: if stored legs are empty, try reconstructing from saved strategy
+      if (!legsSource.length) {
+        const map = await fetchSavedStrategiesMap(underlying);
+        const saved = map[pos.name];
+        if (saved && Array.isArray(saved.optionLegs)) {
+          const rebuilt: OptionLegType[] = [];
+          for (const item of saved.optionLegs as any[]) {
+            let strike: number | null = null;
+            if (item?.strikeRef?.kind === 'ATM' && atmBase !== null && strikes.length) {
+              const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-atmBase) < Math.abs(prev-atmBase) ? curr : prev, strikes[0]);
+              const atmIdx = Math.max(0, strikes.findIndex((s:number)=>s===nearest));
+              let idx = atmIdx + (item.strikeRef.offset as number);
+              if (idx < 0) idx = 0;
+              if (idx > strikes.length-1) idx = strikes.length-1;
+              strike = strikes[idx];
+            } else if (typeof item?.strike === 'number') {
+              if (strikes.length) {
+                let best = strikes[0]; let bestDiff = Math.abs(best - item.strike);
+                for (const s of strikes){ const d = Math.abs(s - item.strike); if (d < bestDiff){ bestDiff = d; best = s; } }
+                strike = best;
+              } else {
+                strike = item.strike;
+              }
+            }
+            if (strike !== null) {
+              const row = rowByStrike.get(strike);
+              const price = item.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+              const iv = row?.iv ?? null;
+              rebuilt.push({ active: item.active ?? true, action: item.action, expiry: useExpiry, strike, type: item.type, lots: item.lots, price, iv } as OptionLegType);
+            }
+          }
+          legsSource = rebuilt;
+        }
+      }
+      const normalizedLegs: OptionLegType[] = (legsSource || []).map((leg) => {
+        // Snap to nearest available strike for current snapshot
+        let strike = leg.strike;
+        if (strikes.length) {
+          if (!strikes.includes(leg.strike)) {
+            let best = strikes[0]; let bestDiff = Math.abs(best - leg.strike);
+            for (const s of strikes) { const d = Math.abs(s - leg.strike); if (d < bestDiff) { bestDiff = d; best = s; } }
+            strike = best;
+          }
+        }
+        const row = rowByStrike.get(strike);
+        const price = leg.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+        const iv = row?.iv ?? null;
+        return { ...leg, active: (leg as any).active ?? true, expiry: useExpiry, strike, price, iv } as OptionLegType;
+      });
+      dispatch(setSBOptionLegs({ type: 'set', optionLegs: normalizedLegs } as any));
+      dispatch(setSBExpiry(useExpiry));
+    })();
   }, [selectedId, data]);
 
   const handleExit = async () => {
@@ -77,6 +159,45 @@ const Positions = () => {
     } else {
       setToastPack(p=>[...p,{ key: Date.now(), type: 'error', message: 'Failed to exit position' }]);
     }
+    setOpen(true);
+  };
+
+  const handleRecalculate = () => {
+    if (!selectedId || !data) {
+      setToastPack(p=>[...p,{ key: Date.now(), type: 'error', message: 'Select a position first' }]);
+      setOpen(true);
+      return;
+    }
+    const pos = filtered.find(p => p.id === selectedId);
+    if (!pos) return;
+    const { grouped, underlyingValue } = data as any;
+    const g = grouped?.[pos.expiry];
+    const rows = (g?.data || []) as any[];
+    const strikes: number[] = rows.map((r:any) => r.strikePrice || r.strike).filter((v:any)=> typeof v==='number');
+    const rowByStrike = new Map<number, any>();
+    for (const r of rows) {
+      const k = (r.strikePrice ?? r.strike) as number;
+      if (typeof k === 'number') rowByStrike.set(k, r);
+    }
+    const normalizedLegs: OptionLegType[] = (pos.legs || []).map((leg) => {
+      let strike = leg.strike;
+      if (strikes.length) {
+        if (!strikes.includes(leg.strike)) {
+          let best = strikes[0]; let bestDiff = Math.abs(best - leg.strike);
+          for (const s of strikes) { const d = Math.abs(s - leg.strike); if (d < bestDiff) { bestDiff = d; best = s; } }
+          strike = best;
+        }
+      }
+      const row = rowByStrike.get(strike);
+      const price = leg.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+      const iv = row?.iv ?? null;
+      return { ...leg, active: (leg as any).active ?? true, expiry: pos.expiry, strike, price, iv } as OptionLegType;
+    });
+    dispatch(setSBUnderlyingPrice(underlyingValue));
+    dispatch(setSBOptionLegs({ type: 'set', optionLegs: normalizedLegs } as any));
+    dispatch(setSBExpiry(pos.expiry));
+    dispatch(setSBTargetDateTime({ value: getTargetDateTime().toISOString(), autoUpdate: true } as any));
+    setToastPack(p=>[...p,{ key: Date.now(), type: 'success', message: 'Recalculated with latest prices' }]);
     setOpen(true);
   };
 
@@ -101,6 +222,9 @@ const Positions = () => {
           </Grid>
           <Grid item xs='auto'>
             <Button variant='outlined' size='small' disabled={!selectedId} onClick={()=>setAdjustOpen(true)}>Adjust</Button>
+          </Grid>
+          <Grid item xs='auto'>
+            <Button variant='outlined' size='small' disabled={!selectedId} onClick={handleRecalculate}>Recalculate</Button>
           </Grid>
         </Grid>
 
