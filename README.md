@@ -1,5 +1,5 @@
 ## Modification done on original - testing
-## NSE OI VISUALIZER & STRATEGY-BUILDER
+## started from - NSE OI VISUALIZER & STRATEGY-BUILDER
 
 A simple React application inspired by [Sensibull](https://www.sensibull.com/), that visualizes real-time Open Interest data and Option Strategy Profit and Loss (WIP) for Indian Benchmark Indices and F&O stocks. The app fetches data from NSE API to show OI bar plots and Strategy Payoff line plots. The data is auto-updated at 3-minute intervals. Frontend is made with React, Material UI, Redux and D3. Backend is made with NodeJS. (Note: The app is work in progress).
 
@@ -46,3 +46,13 @@ A simple React application inspired by [Sensibull](https://www.sensibull.com/), 
 
 ## Site link
 ## https://nse-oi-visualizer.pages.dev/
+
+---
+
+## Documentation
+
+- Architecture overview: see `ARCHITECTURE.md`
+- Backend API reference: `docs/API.md`
+- Data organization: `docs/DATA.md`
+- Frontend architecture: `docs/FRONTEND.md`
+- Backend architecture: `docs/BACKEND.md`
