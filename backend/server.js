@@ -250,7 +250,20 @@ app.post('/positions', (req, res) => {
   }
   const list = readJson(positionsFile, []);
   const id = pos.id || `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
-  const withId = { ...pos, id, exit: normalizeExit(pos.exit) };
+  const now = Date.now();
+  const createdAt = typeof pos.createdAt === 'number' ? pos.createdAt : now;
+  const entryAt = typeof pos.entryAt === 'number' ? pos.entryAt : createdAt;
+  const status = pos.status === 'closed' || pos.status === 'scheduled' ? pos.status : 'open';
+  const withId = { 
+    ...pos, 
+    id, 
+    status,
+    createdAt,
+    entryAt,
+    updatedAt: now,
+    exitAt: typeof pos.exitAt === 'number' ? pos.exitAt : (status === 'closed' ? now : undefined),
+    exit: normalizeExit(pos.exit)
+  };
   list.push(withId);
   writeJson(positionsFile, list);
   res.status(200).json(withId).end();
@@ -263,7 +276,16 @@ app.patch('/positions/:id', (req, res) => {
   const list = readJson(positionsFile, []);
   const idx = list.findIndex(p => p.id === id);
   if (idx < 0) return res.status(404).json({ error: 'not found' });
-  const merged = { ...list[idx], ...patch };
+  const prev = list[idx];
+  const merged = { ...prev, ...patch };
+  // timestamps
+  const now = Date.now();
+  merged.updatedAt = now;
+  if (merged.status === 'closed' && !merged.exitAt) {
+    merged.exitAt = now;
+  }
+  if (!merged.createdAt) merged.createdAt = prev.createdAt || now;
+  if (!merged.entryAt) merged.entryAt = prev.entryAt || merged.createdAt;
   merged.exit = normalizeExit(merged.exit);
   list[idx] = merged;
   writeJson(positionsFile, list);

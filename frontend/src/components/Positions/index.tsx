@@ -16,6 +16,9 @@ type Position = {
   legs: OptionLegType[];
   status: 'open'|'closed'|'scheduled';
   createdAt: number;
+  entryAt?: number;
+  exitAt?: number;
+  updatedAt?: number;
   schedule?: { day: string; time: string };
   exit?: { mode: 'stopLossPct'|'stopLossAbs'|'onExpiry'; stopLossPct?: string; stopLossAbs?: string; profitTargetPct?: string; trailingEnabled?: boolean };
 };
@@ -74,8 +77,20 @@ const Positions = () => {
   const [noteDraft, setNoteDraft] = useState('');
   const NOTE_MAX = 1000;
 
-  // Filter positions by current underlying
-  const filtered = useMemo(()=> positions.filter(p => p.underlying === underlying), [positions, underlying]);
+  // Helper to check if a timestamp is on the same local day as today
+  const isSameLocalDay = (ms?: number) => {
+    if (!ms || !Number.isFinite(ms)) return false;
+    const a = new Date(ms);
+    const b = new Date();
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  };
+
+  // Filter positions: by underlying AND include all open, plus those closed today
+  const filtered = useMemo(()=> {
+    return positions
+      .filter(p => p.underlying === underlying)
+      .filter(p => p.status === 'open' || (p.status === 'closed' && isSameLocalDay(p.exitAt)));
+  }, [positions, underlying]);
 
   useEffect(()=>{ (async ()=>{ setPositions(await fetchPositions(underlying)); })(); }, [underlying]);
 

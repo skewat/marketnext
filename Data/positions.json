@@ -109,7 +109,7 @@
         "iv": 0.07467349309830577
       }
     ],
-    "status": "open",
+    "status": "closed",
     "createdAt": 1759472016300,
     "exit": {
       "mode": "onExpiry",
@@ -118,6 +118,9 @@
       "profitTargetPct": "2",
       "trailingEnabled": false
     },
-    "id": "1759472016310-9m0so"
+    "id": "1759472016310-9m0so",
+    "updatedAt": 1759516320591,
+    "exitAt": 1759516320591,
+    "entryAt": 1759472016300
   }
 ]
