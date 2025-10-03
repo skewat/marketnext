@@ -268,11 +268,24 @@ const Positions = () => {
           </Grid>
         </Grid>
 
-        {selectedId && (
-          <Box>
-            <PNLVisualizer />
-          </Box>
-        )}
+        {selectedId && (()=>{
+          const pos = filtered.find(p => p.id === selectedId);
+          if (!pos) return null;
+          const isClosed = pos.status === 'closed';
+          if (isClosed) {
+            // For closed positions, reuse PNLVisualizer to only render Current PnL card (no chart/other data)
+            return (
+              <Box>
+                <PNLVisualizer showMargin={false} showCurrentPnL={true} onlyCurrentPnL={true} pnlLabel={'Realised PnL'} />
+              </Box>
+            );
+          }
+          return (
+            <Box>
+              <PNLVisualizer showMargin={false} showCurrentPnL={true} />
+            </Box>
+          );
+        })()}
       </Paper>
 
       <Drawer anchor='right' open={adjustOpen} onClose={()=>setAdjustOpen(false)}>

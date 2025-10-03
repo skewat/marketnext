@@ -4,10 +4,22 @@ import { formatAndAddSuffix } from "../../../utils";
 
 type MetricsProps = {
   metrics: Metrics | undefined;
+  showMargin?: boolean;
+  currentPnL?: number | undefined;
+  // When true, render only the Current PnL card (used for closed positions)
+  onlyCurrentPnL?: boolean;
+  // Optional override for the PnL label (e.g., "Realised PnL" for closed trades)
+  pnlLabel?: string;
 };
 
-const StrategyMetrics = ({ metrics }: MetricsProps) => {
+const StrategyMetrics = ({ metrics, showMargin = true, currentPnL, onlyCurrentPnL = false, pnlLabel = "Current PnL" }: MetricsProps) => {
   if (!metrics) return null;
+
+  const formatSigned2 = (v: number) => {
+    const sign = v >= 0 ? '+' : '-';
+    const amt = Math.abs(v).toFixed(2);
+    return `${sign}₹${amt}`;
+  };
 
   return (
     <Box 
@@ -18,6 +30,26 @@ const StrategyMetrics = ({ metrics }: MetricsProps) => {
         flexWrap: "wrap"
       }}
     >
+      {typeof currentPnL === 'number' && onlyCurrentPnL && (
+        <Paper 
+          sx={{ 
+            flex: 1, 
+            p: 2, 
+            minWidth: "150px",
+            backgroundColor: currentPnL >= 0 ? "success.dark" : "error.dark",
+            color: "white"
+          }}
+        >
+          <Typography variant="subtitle2">{pnlLabel}</Typography>
+          <Typography variant="h6">{formatSigned2(currentPnL)}</Typography>
+        </Paper>
+      )}
+      {onlyCurrentPnL && (
+        // Only current PnL requested
+        null
+      )}
+      {!onlyCurrentPnL && (
+        <>
       <Paper 
         sx={{ 
           flex: 1, 
@@ -49,27 +81,45 @@ const StrategyMetrics = ({ metrics }: MetricsProps) => {
           {metrics.isMaxLossUnlimited ? "Unlimited" : `₹${formatAndAddSuffix(Math.abs(metrics.maxLoss))}`}
         </Typography>
       </Paper>
-      <Paper 
-        sx={{ 
-          flex: 1, 
-          p: 2, 
-          minWidth: "150px",
-          backgroundColor: "warning.main",
-          color: "white"
-        }}
-      >
-        <Typography variant="subtitle2">Margin Required</Typography>
-        <Typography variant="h6">₹{formatAndAddSuffix(metrics.marginRequired)}</Typography>
-        <Typography variant="caption">
-          ROIC: {
-            metrics.isMaxProfitUnlimited
-              ? "∞%"
-              : metrics.marginRequired > 0
-                ? `${(metrics.maxProfit / metrics.marginRequired * 100).toFixed(2)}%`
-                : "—"
-          }
-        </Typography>
-      </Paper>
+      {showMargin && (
+        <Paper 
+          sx={{ 
+            flex: 1, 
+            p: 2, 
+            minWidth: "150px",
+            backgroundColor: "warning.main",
+            color: "white"
+          }}
+        >
+          <Typography variant="subtitle2">Margin Required</Typography>
+          <Typography variant="h6">₹{formatAndAddSuffix(metrics.marginRequired)}</Typography>
+          <Typography variant="caption">
+            ROIC: {
+              metrics.isMaxProfitUnlimited
+                ? "∞%"
+                : metrics.marginRequired > 0
+                  ? `${(metrics.maxProfit / metrics.marginRequired * 100).toFixed(2)}%`
+                  : "—"
+            }
+          </Typography>
+        </Paper>
+      )}
+      {typeof currentPnL === 'number' && (
+        <Paper 
+          sx={{ 
+            flex: 1, 
+            p: 2, 
+            minWidth: "150px",
+            backgroundColor: currentPnL >= 0 ? "success.dark" : "error.dark",
+            color: "white"
+          }}
+        >
+          <Typography variant="subtitle2">{pnlLabel}</Typography>
+          <Typography variant="h6">{formatSigned2(currentPnL)}</Typography>
+        </Paper>
+      )}
+        </>
+      )}
       <Paper 
         sx={{ 
           flex: 1, 
