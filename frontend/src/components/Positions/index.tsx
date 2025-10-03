@@ -42,6 +42,22 @@ const fetchSavedStrategiesMap = async (underlying: string): Promise<Record<strin
   } catch { return {}; }
 };
 
+const fetchStrategyNote = async (underlying: string, name: string): Promise<string | null> => {
+  try {
+    const res = await fetch(`${apiBase}/strategy-note?underlying=${encodeURIComponent(underlying)}&name=${encodeURIComponent(name)}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json?.content ?? null;
+  } catch { return null; }
+};
+
+const saveStrategyNote = async (underlying: string, name: string, content: string): Promise<boolean> => {
+  try {
+    const res = await fetch(`${apiBase}/strategy-note`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ underlying, name, content }) });
+    return res.ok;
+  } catch { return false; }
+};
+
 const Positions = () => {
   const dispatch = useDispatch();
   const underlying = useSelector(getUnderlying);
@@ -51,6 +67,12 @@ const Positions = () => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [noteLoading, setNoteLoading] = useState(false);
+  const [noteContent, setNoteContent] = useState<string | null>(null);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [noteEditMode, setNoteEditMode] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const NOTE_MAX = 1000;
 
   // Filter positions by current underlying
   const filtered = useMemo(()=> positions.filter(p => p.underlying === underlying), [positions, underlying]);
@@ -150,6 +172,24 @@ const Positions = () => {
     })();
   }, [selectedId, data]);
 
+  // Load adjustment note when Adjust drawer opens
+  useEffect(() => {
+    if (!adjustOpen) {
+      setNoteContent(null);
+      setNoteError(null);
+      setNoteLoading(false);
+      return;
+    }
+    const pos = positions.find(p => p.id === selectedId);
+    if (!pos) { setNoteContent(null); return; }
+    setNoteLoading(true);
+    setNoteError(null);
+    fetchStrategyNote(pos.underlying, pos.name)
+      .then(content => { if (content) setNoteContent(content); else setNoteError('No adjustment note found for this strategy.'); })
+      .catch(() => setNoteError('Failed to load adjustment note.'))
+      .finally(() => setNoteLoading(false));
+  }, [adjustOpen, selectedId, positions]);
+
   const handleExit = async () => {
     if (!selectedId) return;
     const updated = await patchPosition(selectedId, { status: 'closed' });
@@ -238,7 +278,57 @@ const Positions = () => {
       <Drawer anchor='right' open={adjustOpen} onClose={()=>setAdjustOpen(false)}>
         <Box sx={{ width: { xs: 320, md: 420 }, p:2 }}>
           <Typography variant='h6' sx={{ mb:2 }}>Adjust position</Typography>
-          <Typography variant='body2' color='text.secondary'>Adjustment tools coming soon.</Typography>
+          {noteLoading && (
+            <Typography variant='body2' color='text.secondary'>Loading note…</Typography>
+          )}
+          {!noteLoading && noteError && (
+            <Typography variant='body2' color='error'>{noteError}</Typography>
+          )}
+          {!noteLoading && !noteError && noteContent && !noteEditMode && (
+            <>
+              <Typography variant='subtitle2' gutterBottom>When things go against</Typography>
+              <Box component='pre' sx={{ whiteSpace:'pre-wrap', bgcolor:'background.default', p:1, borderRadius:1, maxHeight: 360, overflow:'auto', fontSize: 13 }}>
+                {noteContent}
+              </Box>
+              <Box sx={{ display:'flex', gap:1, mt:1 }}>
+                <Button size='small' variant='text' onClick={()=>{ setNoteEditMode(true); setNoteDraft(noteContent || ''); }}>Edit note</Button>
+                <Typography variant='caption' color='text.secondary' sx={{ alignSelf:'center' }}>Or edit on server: Data/strategy-notes/UNDERLYING/StrategyName.txt</Typography>
+              </Box>
+            </>
+          )}
+          {!noteLoading && !noteError && noteEditMode && (
+            <>
+              <Typography variant='subtitle2' gutterBottom>Edit adjustment note</Typography>
+              <Box sx={{ display:'flex', flexDirection:'column', gap:1 }}>
+                <textarea
+                  value={noteDraft}
+                  onChange={e=>{
+                    const next = e.target.value;
+                    setNoteDraft(next.length > NOTE_MAX ? next.slice(0, NOTE_MAX) : next);
+                  }}
+                  maxLength={NOTE_MAX}
+                  style={{ width:'100%', height:240, padding:8, fontFamily:'inherit', fontSize:13 }}
+                />
+                <Typography variant='caption' color='text.secondary' sx={{ alignSelf:'flex-end' }}>{noteDraft.length}/{NOTE_MAX}</Typography>
+                <Box sx={{ display:'flex', gap:1, justifyContent:'flex-end' }}>
+                  <Button size='small' onClick={()=>{ setNoteEditMode(false); }}>Cancel</Button>
+                  <Button size='small' variant='contained' onClick={async()=>{
+                    const pos = positions.find(p => p.id === selectedId);
+                    if (!pos) return;
+                    const ok = await saveStrategyNote(pos.underlying, pos.name, noteDraft);
+                    if (ok) { setNoteContent(noteDraft); setNoteEditMode(false); setToastPack(p=>[...p,{ key: Date.now(), type:'success', message:`Note saved (${Math.min(noteDraft.length, NOTE_MAX)}/${NOTE_MAX})` }]); } else { setToastPack(p=>[...p,{ key: Date.now(), type:'error', message:'Failed to save note' }]); }
+                    setOpen(true);
+                  }}>Save</Button>
+                </Box>
+              </Box>
+            </>
+          )}
+          {!noteLoading && !noteError && !noteContent && (
+            <Box sx={{ display:'flex', flexDirection:'column', gap:1 }}>
+              <Typography variant='body2' color='text.secondary'>No note available.</Typography>
+              <Button size='small' variant='text' onClick={()=>{ setNoteEditMode(true); setNoteDraft(''); }}>Add note</Button>
+            </Box>
+          )}
         </Box>
       </Drawer>
     </Box>

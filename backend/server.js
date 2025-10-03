@@ -32,17 +32,59 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const dataRoot = path.resolve(repoRoot, 'Data');
 const oiCacheDir = path.resolve(dataRoot, 'oi-cache');
+const strategyNotesDir = path.resolve(dataRoot, 'strategy-notes');
+const NOTE_MAX_LENGTH = 1000;
 const ensureDir = (dir)=>{ if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); };
 ensureDir(dataRoot);
 ensureDir(oiCacheDir);
+ensureDir(strategyNotesDir);
 
 // JSON file storage for strategies and positions
 const strategiesFile = path.join(dataRoot, 'strategies.json');
 const positionsFile = path.join(dataRoot, 'positions.json');
+const openAlgoConfigFile = path.join(dataRoot, 'openalgo.json');
+const safeName = (name) => String(name).replace(/[^a-zA-Z0-9_\-\. ]+/g, '_').trim();
+const notePath = (underlying, name) => path.join(strategyNotesDir, String(underlying).toUpperCase(), `${safeName(name)}.txt`);
 const readJson = (file, fallback) => {
   try { if (!fs.existsSync(file)) return fallback; const t = fs.readFileSync(file, 'utf8'); return JSON.parse(t); } catch { return fallback; }
 };
 const writeJson = (file, data) => { try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); } catch {} };
+
+// Normalize exit object to enforce backend semantics
+const normalizeExit = (exit) => {
+  const toPosStr = (v) => {
+    const n = typeof v === 'string' ? parseFloat(v) : (typeof v === 'number' ? v : NaN);
+    return Number.isFinite(n) && n > 0 ? String(n) : '0';
+  };
+  const mode = exit?.mode === 'stopLossAbs' || exit?.mode === 'stopLossPct' ? exit.mode : 'onExpiry';
+  const profitTargetPct = toPosStr(exit?.profitTargetPct);
+  if (mode === 'onExpiry') {
+    return {
+      mode,
+      stopLossPct: '0',
+      stopLossAbs: '0',
+      profitTargetPct,
+      trailingEnabled: false,
+    };
+  }
+  if (mode === 'stopLossPct') {
+    return {
+      mode,
+      stopLossPct: toPosStr(exit?.stopLossPct),
+      stopLossAbs: '0',
+      profitTargetPct,
+      trailingEnabled: !!exit?.trailingEnabled,
+    };
+  }
+  // mode === 'stopLossAbs'
+  return {
+    mode,
+    stopLossPct: '0',
+    stopLossAbs: toPosStr(exit?.stopLossAbs),
+    profitTargetPct,
+    trailingEnabled: !!exit?.trailingEnabled,
+  };
+};
 
 const CACHE_TTL_MS = 60 * 1000; // 1 minute default; can align with polling cadence
 const cachePath = (identifier) => path.join(oiCacheDir, `${identifier.toUpperCase().replace(/[^A-Z0-9_-]/gi,'_')}.json`);
@@ -147,6 +189,17 @@ app.post('/strategies', (req, res) => {
   const creator = existing.creator || strategy.creator || undefined; // optional; if provided earlier, keep
   root[underlying][name] = { ...strategy, type, ...(creator ? { creator } : {}) };
   writeJson(strategiesFile, root);
+  // Create a note file for the strategy if it does not exist yet
+  try {
+    const dir = path.dirname(notePath(underlying, name));
+    ensureDir(dir);
+    const p = notePath(underlying, name);
+    if (!fs.existsSync(p)) {
+      const template = `Strategy: ${name}\nUnderlying: ${underlying}\nUpdated: ${new Date().toISOString()}\n\nWhen things go against:\n- Describe adjustments to consider (roll strikes, reduce lots, hedge, exit)\n- Define thresholds (IV spike, delta, underlying move)\n- Contingency plan\n`;
+      const trimmed = template.slice(0, NOTE_MAX_LENGTH);
+      fs.writeFileSync(p, trimmed, 'utf8');
+    }
+  } catch {}
   res.status(200).json({ ok: true }).end();
 });
 
@@ -197,7 +250,7 @@ app.post('/positions', (req, res) => {
   }
   const list = readJson(positionsFile, []);
   const id = pos.id || `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
-  const withId = { ...pos, id };
+  const withId = { ...pos, id, exit: normalizeExit(pos.exit) };
   list.push(withId);
   writeJson(positionsFile, list);
   res.status(200).json(withId).end();
@@ -210,7 +263,9 @@ app.patch('/positions/:id', (req, res) => {
   const list = readJson(positionsFile, []);
   const idx = list.findIndex(p => p.id === id);
   if (idx < 0) return res.status(404).json({ error: 'not found' });
-  list[idx] = { ...list[idx], ...patch };
+  const merged = { ...list[idx], ...patch };
+  merged.exit = normalizeExit(merged.exit);
+  list[idx] = merged;
   writeJson(positionsFile, list);
   res.status(200).json(list[idx]).end();
 });
@@ -222,6 +277,111 @@ app.delete('/positions/:id', (req, res) => {
   const next = list.filter(p => p.id !== id);
   writeJson(positionsFile, next);
   res.status(200).json({ ok: true }).end();
+});
+
+// Strategy note API (read-only)
+// GET /strategy-note?underlying=...&name=...
+app.get('/strategy-note', (req, res) => {
+  const { underlying, name } = req.query;
+  if (!underlying || !name) return res.status(400).json({ error: 'underlying and name required' });
+  const p = notePath(underlying, name);
+  try {
+    if (!fs.existsSync(p)) return res.status(404).json({ error: 'note not found' });
+    const raw = fs.readFileSync(p, 'utf8');
+    const content = raw.slice(0, NOTE_MAX_LENGTH);
+    const truncated = raw.length > NOTE_MAX_LENGTH;
+    return res.status(200).json({ content, truncated, length: content.length }).end();
+  } catch (e) {
+    return res.status(500).json({ error: 'failed to read note' });
+  }
+});
+
+// PATCH /strategy-note (create or update)
+// body: { underlying, name, content }
+app.patch('/strategy-note', (req, res) => {
+  const { underlying, name, content } = req.body || {};
+  if (!underlying || !name || typeof content !== 'string') return res.status(400).json({ error: 'underlying, name, content required' });
+  try {
+    const p = notePath(underlying, name);
+    ensureDir(path.dirname(p));
+    const str = String(content);
+    const trimmed = str.length > NOTE_MAX_LENGTH ? str.slice(0, NOTE_MAX_LENGTH) : str;
+    fs.writeFileSync(p, trimmed, 'utf8');
+    return res.status(200).json({ ok: true, truncated: trimmed.length < str.length, length: trimmed.length });
+  } catch (e) {
+    return res.status(500).json({ error: 'failed to write note' });
+  }
+});
+
+// OpenAlgo config API (persist API key)
+// GET /openalgo-config -> { apiKey?: string }
+app.get('/openalgo-config', (req, res) => {
+  try {
+    const cfg = readJson(openAlgoConfigFile, {});
+    return res.status(200).json({ apiKey: cfg.apiKey || '' });
+  } catch (e) {
+    return res.status(500).json({ error: 'failed to read config' });
+  }
+});
+
+// PATCH /openalgo-config { apiKey }
+app.patch('/openalgo-config', (req, res) => {
+  const { apiKey } = req.body || {};
+  if (typeof apiKey !== 'string') return res.status(400).json({ error: 'apiKey (string) required' });
+  try {
+    writeJson(openAlgoConfigFile, { apiKey });
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ error: 'failed to write config' });
+  }
+});
+
+// POST /openalgo/funds { host?: string, apiKey?: string }
+app.post('/openalgo/funds', async (req, res) => {
+  const { host, apiKey } = req.body || {};
+  const cfg = readJson(openAlgoConfigFile, {});
+  const key = (typeof apiKey === 'string' && apiKey) ? apiKey : (cfg.apiKey || '');
+  const base = (typeof host === 'string' && host) ? host : 'http://127.0.0.1:5000';
+  const url = String(base).replace(/\/$/, '') + '/funds';
+  if (!key) return res.status(400).json({ error: 'apiKey required' });
+  const headers = { 'X-API-KEY': key };
+  const started = Date.now();
+  try {
+    const axiosRes = await axios.get(url, { headers, validateStatus: () => true });
+    const ms = Date.now() - started;
+    const rawBody = typeof axiosRes.data === 'string' ? axiosRes.data : JSON.stringify(axiosRes.data);
+    let parsed = null;
+    try { parsed = typeof axiosRes.data === 'string' ? JSON.parse(axiosRes.data) : axiosRes.data; } catch {}
+    const MAX_RAW = 10000;
+    const u = new URL(url);
+    const pathWithQuery = u.pathname + u.search;
+    const hostHeader = u.host;
+    const maskedKey = key.length <= 5 ? '*'.repeat(key.length) : key.slice(0,3) + '***' + key.slice(-2);
+    const requestRaw = [`GET ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `X-API-KEY: ${maskedKey}`, '', ''].join('\n');
+    const statusLine = `HTTP/1.1 ${axiosRes.status}`;
+    const respHeaderLines = Object.entries(axiosRes.headers || {}).map(([k,v])=>`${k}: ${String(v)}`);
+    const clippedBody = rawBody.length > MAX_RAW ? rawBody.slice(0, MAX_RAW) + `\n…(${rawBody.length - MAX_RAW} more bytes)` : rawBody;
+    const responseRaw = [statusLine, ...respHeaderLines, '', clippedBody].join('\n');
+    return res.status(200).json({
+      ok: true,
+      data: parsed ?? rawBody,
+      debug: {
+        durationMs: ms,
+        request: { method: 'GET', url, headers: { 'Host': hostHeader, 'X-API-KEY': maskedKey } },
+        response: { status: axiosRes.status, headers: axiosRes.headers },
+        requestRaw,
+        responseRaw,
+      }
+    });
+  } catch (e) {
+    const u = new URL(url);
+    const pathWithQuery = u.pathname + u.search;
+    const hostHeader = u.host;
+    const maskedKey = key.length <= 5 ? '*'.repeat(key.length) : key.slice(0,3) + '***' + key.slice(-2);
+    const requestRaw = [`GET ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `X-API-KEY: ${maskedKey}`, '', ''].join('\n');
+    const responseRaw = [`HTTP/1.1 0 Network Error`, '', String(e?.message || 'Failed to connect')].join('\n');
+    return res.status(502).json({ error: 'failed to fetch funds', debug: { requestRaw, responseRaw } });
+  }
 });
 
 // Clear a cached identifier

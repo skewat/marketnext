@@ -62,5 +62,62 @@
       "trailingEnabled": false
     },
     "id": "1759336201698-tatbn"
+  },
+  {
+    "name": "test1",
+    "underlying": "NIFTY",
+    "expiry": "07-Oct-2025",
+    "legs": [
+      {
+        "active": true,
+        "action": "B",
+        "expiry": "07-Oct-2025",
+        "strike": 24800,
+        "type": "CE",
+        "lots": 1,
+        "price": 108.5,
+        "iv": 0.07692218413635614
+      },
+      {
+        "active": true,
+        "action": "B",
+        "expiry": "07-Oct-2025",
+        "strike": 24800,
+        "type": "PE",
+        "lots": 1,
+        "price": 58.9,
+        "iv": 0.07692218413635614
+      },
+      {
+        "active": true,
+        "action": "S",
+        "expiry": "07-Oct-2025",
+        "strike": 24500,
+        "type": "PE",
+        "lots": 2,
+        "price": 10.05,
+        "iv": 0.09704300251390956
+      },
+      {
+        "active": true,
+        "action": "S",
+        "expiry": "07-Oct-2025",
+        "strike": 25100,
+        "type": "CE",
+        "lots": 2,
+        "price": 9.9,
+        "iv": 0.07467349309830577
+      }
+    ],
+    "status": "open",
+    "createdAt": 1759472016300,
+    "exit": {
+      "mode": "onExpiry",
+      "stopLossPct": "0",
+      "stopLossAbs": "0",
+      "profitTargetPct": "2",
+      "trailingEnabled": false
+    },
+    "id": "1759472016310-9m0so"
   }
 ]

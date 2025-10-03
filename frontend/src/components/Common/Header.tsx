@@ -70,6 +70,8 @@ const renderLogo = () => {
       navigate('/positions');
     } else if (newValue === 4) {
       navigate('/trends');
+    } else if (newValue === 5) {
+      navigate('/openalgo');
     };
   };
 
@@ -84,6 +86,8 @@ const renderLogo = () => {
       setValue(3);
     } else if (path === '/trends') {
       setValue(4);
+    } else if (path === '/openalgo') {
+      setValue(5);
     };
   }, [path]);
 
@@ -128,6 +132,7 @@ const renderLogo = () => {
             <Tab disableRipple label="Strategy deploy" sx={{ textTransform: "none", py: 2.9 }} />
             <Tab disableRipple label="Positions" sx={{ textTransform: "none", py: 2.9 }} />
             <Tab disableRipple label="Trend analyses" sx={{ textTransform: "none", py: 2.9 }} />
+            <Tab disableRipple label="OpenAlgo" sx={{ textTransform: "none", py: 2.9 }} />
           </Tabs>
         </div>}
         <div style={{ display: "inline-flex", flexGrow: 1, flexBasis: 0, alignItems: "center", justifyContent: "flex-end" }}>
@@ -179,6 +184,7 @@ const renderLogo = () => {
                 <Tab disableRipple label="Strategy deploy" sx={{ textTransform: "none", py: 2.9 }} />
                 <Tab disableRipple label="Positions" sx={{ textTransform: "none", py: 2.9 }} />
                 <Tab disableRipple label="Trend analyses" sx={{ textTransform: "none", py: 2.9 }} />
+                <Tab disableRipple label="OpenAlgo" sx={{ textTransform: "none", py: 2.9 }} />
               </Tabs>
             </div>
           </Drawer>

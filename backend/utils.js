@@ -496,7 +496,7 @@ export const getPayoffData = (builderData) => {
   }
 
   // Calculate strategy metrics
-  const strategyMetrics = calculateStrategyMetrics(payoffs[1], totalInvestment);
+  const strategyMetrics = calculateStrategyMetrics(payoffs[1], totalInvestment, optionLegs, underlyingPrice);
   
   // Calculate margin required
   // If the strategy has defined risk (no unlimited loss), use max loss as margin requirement.

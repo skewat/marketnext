@@ -3,63 +3,63 @@
     "test3": {
       "name": "test3",
       "underlying": "NIFTY",
-      "expiry": "07-Oct-2025",
+      "expiry": "28-Oct-2025",
       "version": 2,
       "optionLegs": [
         {
           "active": true,
           "action": "B",
-          "expiry": "07-Oct-2025",
+          "expiry": "28-Oct-2025",
           "strikeRef": {
             "kind": "ATM",
-            "offset": -1
+            "offset": -4
           },
-          "type": "CE",
+          "type": "PE",
           "lots": 1,
-          "price": 113,
-          "iv": 0.07690439068002168
+          "price": 155.25,
+          "iv": 0.09573888067081517
+        },
+        {
+          "active": true,
+          "action": "S",
+          "expiry": "28-Oct-2025",
+          "strikeRef": {
+            "kind": "ATM",
+            "offset": -6
+          },
+          "type": "PE",
+          "lots": 2,
+          "price": 125.45,
+          "iv": 0.09752292814261262
         },
         {
           "active": true,
           "action": "B",
-          "expiry": "07-Oct-2025",
+          "expiry": "28-Oct-2025",
           "strikeRef": {
             "kind": "ATM",
-            "offset": -1
+            "offset": 4
           },
-          "type": "PE",
+          "type": "CE",
           "lots": 1,
-          "price": 84.35,
-          "iv": 0.07690439068002168
+          "price": 149.95,
+          "iv": 0.08766779790706186
         },
         {
           "active": true,
           "action": "S",
-          "expiry": "07-Oct-2025",
+          "expiry": "28-Oct-2025",
           "strikeRef": {
             "kind": "ATM",
-            "offset": -7
-          },
-          "type": "PE",
-          "lots": 2,
-          "price": 20.55,
-          "iv": 0.0941655187326329
-        },
-        {
-          "active": true,
-          "action": "S",
-          "expiry": "07-Oct-2025",
-          "strikeRef": {
-            "kind": "ATM",
-            "offset": 5
+            "offset": 6
           },
           "type": "CE",
           "lots": 2,
-          "price": 15.4,
-          "iv": 0.07453694237215315
+          "price": 113,
+          "iv": 0.08636921297591087
         }
       ],
-      "updatedAt": 1759310701367,
+      "updatedAt": 1759510946344,
       "type": "default"
     },
     "SafeBatman": {

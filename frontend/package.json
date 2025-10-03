@@ -22,6 +22,7 @@
     "d3": "^7.8.5",
     "date-fns": "^3.6.0",
     "dequal": "^2.0.3",
+    "openalgo": "^1.0.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-redux": "^9.0.4",
@@ -37,6 +38,9 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.4",
     "typescript": "^5.2.2",
-    "vite": "^5.0.0"
+    "vite": "^7.1.9"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21"
   }
 }
