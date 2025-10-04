@@ -336,34 +336,56 @@ app.patch('/strategy-note', (req, res) => {
 });
 
 // OpenAlgo config API (persist API key)
-// GET /openalgo-config -> { apiKey?: string }
+// GET /openalgo-config -> { apiKey?: string, host?: string, port?: number }
 app.get('/openalgo-config', (req, res) => {
   try {
     const cfg = readJson(openAlgoConfigFile, {});
-    return res.status(200).json({ apiKey: cfg.apiKey || '' });
+    const apiKey = cfg.apiKey || '';
+    const host = cfg.host || '127.0.0.1';
+    const port = typeof cfg.port === 'number' ? cfg.port : 5000;
+    return res.status(200).json({ apiKey, host, port });
   } catch (e) {
     return res.status(500).json({ error: 'failed to read config' });
   }
 });
 
-// PATCH /openalgo-config { apiKey }
+// PATCH /openalgo-config { apiKey?, host?, port? }
 app.patch('/openalgo-config', (req, res) => {
-  const { apiKey } = req.body || {};
-  if (typeof apiKey !== 'string') return res.status(400).json({ error: 'apiKey (string) required' });
+  const { apiKey, host, port } = req.body || {};
+  if (apiKey !== undefined && typeof apiKey !== 'string') return res.status(400).json({ error: 'apiKey must be string' });
+  if (host !== undefined && typeof host !== 'string') return res.status(400).json({ error: 'host must be string' });
+  if (port !== undefined && !(Number.isInteger(port) && port > 0)) return res.status(400).json({ error: 'port must be positive integer' });
   try {
-    writeJson(openAlgoConfigFile, { apiKey });
+    const prev = readJson(openAlgoConfigFile, {});
+    const next = { ...prev };
+    if (apiKey !== undefined) next.apiKey = apiKey;
+    if (host !== undefined) next.host = host;
+    if (port !== undefined) next.port = port;
+    writeJson(openAlgoConfigFile, next);
     return res.status(200).json({ ok: true });
   } catch (e) {
     return res.status(500).json({ error: 'failed to write config' });
   }
 });
 
-// POST /openalgo/funds { host?: string, apiKey?: string }
+// POST /openalgo/funds { host?: string, port?: number, apiKey?: string }
 app.post('/openalgo/funds', async (req, res) => {
-  const { host, apiKey } = req.body || {};
+  const { host, port, apiKey } = req.body || {};
   const cfg = readJson(openAlgoConfigFile, {});
   const key = (typeof apiKey === 'string' && apiKey) ? apiKey : (cfg.apiKey || '');
-  const base = (typeof host === 'string' && host) ? host : 'http://127.0.0.1:5000';
+  const cfgHost = typeof cfg.host === 'string' && cfg.host ? cfg.host : '127.0.0.1';
+  const cfgPort = Number.isInteger(cfg.port) && cfg.port > 0 ? cfg.port : 5000;
+  const bodyHost = typeof host === 'string' && host ? host : undefined;
+  const bodyPort = Number.isInteger(port) && port > 0 ? port : undefined;
+  const base = (() => {
+    const h = bodyHost ?? cfgHost;
+    const p = bodyPort ?? cfgPort;
+    if (/^https?:\/\//i.test(h)) {
+      // treat as full URL
+      return h.replace(/\/$/, '');
+    }
+    return `http://${h}:${p}`;
+  })();
   const url = String(base).replace(/\/$/, '') + '/funds';
   if (!key) return res.status(400).json({ error: 'apiKey required' });
   const headers = { 'X-API-KEY': key };
