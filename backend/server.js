@@ -386,12 +386,11 @@ app.post('/openalgo/funds', async (req, res) => {
     }
     return `http://${h}:${p}`;
   })();
-  const url = String(base).replace(/\/$/, '') + '/funds';
+  const url = String(base).replace(/\/$/, '') + '/api/v1/funds';
   if (!key) return res.status(400).json({ error: 'apiKey required' });
-  const headers = { 'X-API-KEY': key };
   const started = Date.now();
   try {
-    const axiosRes = await axios.get(url, { headers, validateStatus: () => true });
+    const axiosRes = await axios.post(url, { apikey: key }, { validateStatus: () => true });
     const ms = Date.now() - started;
     const rawBody = typeof axiosRes.data === 'string' ? axiosRes.data : JSON.stringify(axiosRes.data);
     let parsed = null;
@@ -401,7 +400,8 @@ app.post('/openalgo/funds', async (req, res) => {
     const pathWithQuery = u.pathname + u.search;
     const hostHeader = u.host;
     const maskedKey = key.length <= 5 ? '*'.repeat(key.length) : key.slice(0,3) + '***' + key.slice(-2);
-    const requestRaw = [`GET ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `X-API-KEY: ${maskedKey}`, '', ''].join('\n');
+    const requestPayload = JSON.stringify({ apikey: maskedKey }, null, 2);
+    const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `Content-Type: application/json`, '', requestPayload].join('\n');
     const statusLine = `HTTP/1.1 ${axiosRes.status}`;
     const respHeaderLines = Object.entries(axiosRes.headers || {}).map(([k,v])=>`${k}: ${String(v)}`);
     const clippedBody = rawBody.length > MAX_RAW ? rawBody.slice(0, MAX_RAW) + `\n…(${rawBody.length - MAX_RAW} more bytes)` : rawBody;
@@ -411,7 +411,7 @@ app.post('/openalgo/funds', async (req, res) => {
       data: parsed ?? rawBody,
       debug: {
         durationMs: ms,
-        request: { method: 'GET', url, headers: { 'Host': hostHeader, 'X-API-KEY': maskedKey } },
+        request: { method: 'POST', url, headers: { 'Host': hostHeader, 'Content-Type': 'application/json' } },
         response: { status: axiosRes.status, headers: axiosRes.headers },
         requestRaw,
         responseRaw,
@@ -422,7 +422,8 @@ app.post('/openalgo/funds', async (req, res) => {
     const pathWithQuery = u.pathname + u.search;
     const hostHeader = u.host;
     const maskedKey = key.length <= 5 ? '*'.repeat(key.length) : key.slice(0,3) + '***' + key.slice(-2);
-    const requestRaw = [`GET ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `X-API-KEY: ${maskedKey}`, '', ''].join('\n');
+    const requestPayload = JSON.stringify({ apikey: maskedKey }, null, 2);
+    const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `Content-Type: application/json`, '', requestPayload].join('\n');
     const responseRaw = [`HTTP/1.1 0 Network Error`, '', String(e?.message || 'Failed to connect')].join('\n');
     return res.status(502).json({ error: 'failed to fetch funds', debug: { requestRaw, responseRaw } });
   }

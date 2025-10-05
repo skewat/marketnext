@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { Box, Paper, Typography, Grid, TextField, Button, Divider, Checkbox, FormControlLabel } from '@mui/material';
-import OpenAlgoClient from 'openalgo';
+// Removed openalgo client usage; we now call /funds with POST JSON { apikey }
 
 type ProfileResponse = unknown;
 
@@ -45,7 +45,7 @@ const OpenAlgo = () => {
   const runFundsCheck = async () => {
     setLoading(true); setError(null); setStatus(null); setResult(null);
     try {
-      const base = `http://${host}:${port}`.replace(/\/$/, '');
+  const base = `http://${host}:${port}`.replace(/\/$/, '');
       if (useProxy) {
         // Use backend proxy to avoid CORS and get raw dumps from server
         try {
@@ -55,7 +55,7 @@ const OpenAlgo = () => {
             setStatus(200);
             setResult(j.data as any);
             setLog(prev => ([...prev, {
-              id: Date.now(), at: new Date().toISOString(), request: { method: 'POST', url: `${apiBase}/openalgo/funds`, headers: { 'Content-Type': 'application/json' } }, status: 200, durationMs: j?.debug?.durationMs, error: null, responsePreview: typeof j.data === 'string' ? j.data : JSON.stringify(j.data, null, 2), responseHeaders: j?.debug?.response?.headers, requestRaw: j?.debug?.requestRaw, responseRaw: j?.debug?.responseRaw, requestPayload: JSON.stringify({ host: base, apiKey: mask(apiKey) })
+              id: Date.now(), at: new Date().toISOString(), request: { method: 'POST', url: `${apiBase}/openalgo/funds`, headers: { 'Content-Type': 'application/json' } }, status: 200, durationMs: j?.debug?.durationMs, error: null, responsePreview: typeof j.data === 'string' ? j.data : JSON.stringify(j.data, null, 2), responseHeaders: j?.debug?.response?.headers, requestRaw: j?.debug?.requestRaw, responseRaw: j?.debug?.responseRaw, requestPayload: JSON.stringify({ host, port, apiKey: mask(apiKey) })
             }]));
           } else {
             throw new Error(j?.error || 'Proxy call failed');
@@ -64,20 +64,11 @@ const OpenAlgo = () => {
           setError(e?.message || 'Proxy call failed');
         }
       } else {
-        // 1) Use library in-browser
-        try {
-          const client = new OpenAlgoClient(apiKey, base);
-          const libResp = await client.funds();
-          setResult(libResp as any);
-        } catch (libErr: any) {
-          setError(libErr?.message || 'openalgo.funds() failed');
-        }
-        // 2) Also perform raw GET to /funds for logging
-        const url = base + '/funds';
+        // Direct POST with JSON body { apikey }
+  const url = base + '/api/v1/funds';
         const started = performance.now();
-        const headers = { 'X-API-KEY': apiKey } as Record<string, string>;
         try {
-          const res = await fetch(url, { headers });
+          const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apikey: apiKey }) });
           setStatus(res.status);
           const text = await res.text();
           let parsed: any = null;
@@ -93,20 +84,20 @@ const OpenAlgo = () => {
           const u = new URL(url);
           const pathWithQuery = u.pathname + u.search;
           const host = u.host;
-          const reqHeaderLines: string[] = [`Host: ${host}`];
-          Object.entries({ 'X-API-KEY': mask(apiKey) }).forEach(([k,v])=>{ reqHeaderLines.push(`${k}: ${v}`); });
-          const requestRaw = [`GET ${pathWithQuery} HTTP/1.1`, ...reqHeaderLines, '', ''].join('\n');
+          const requestPayload = JSON.stringify({ apikey: mask(apiKey) }, null, 2);
+          const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${host}`, `Content-Type: application/json`, '', requestPayload].join('\n');
           const statusLine = `HTTP/1.1 ${res.status} ${res.statusText || ''}`.trim();
           const respHeaderLines = Object.entries(respHeaders).map(([k,v])=>`${k}: ${v}`);
           const fullRespBody = parsed !== null ? JSON.stringify(parsed, null, 2) : (text ?? '');
           const clippedBody = fullRespBody.length > MAX_RAW ? fullRespBody.slice(0, MAX_RAW) + `\n…(${fullRespBody.length - MAX_RAW} more bytes)` : fullRespBody;
           const responseRaw = [statusLine, ...respHeaderLines, '', clippedBody].join('\n');
+          setResult(parsed ?? text ?? null);
           setLog(prev => [
             ...prev,
             {
               id: Date.now(),
               at: new Date().toISOString(),
-              request: { method: 'GET', url, headers: { 'X-API-KEY': mask(apiKey) } },
+              request: { method: 'POST', url, headers: { 'Content-Type': 'application/json' } },
               status: res.status,
               durationMs: duration,
               responsePreview: preview,
@@ -114,24 +105,23 @@ const OpenAlgo = () => {
               responseHeaders: respHeaders,
               requestRaw,
               responseRaw,
-              requestPayload: null,
+              requestPayload,
             },
           ]);
         } catch (fetchErr: any) {
-          const url2 = base + '/funds';
+          const url2 = base + '/api/v1/funds';
           const u = new URL(url2);
           const pathWithQuery = u.pathname + u.search;
           const host = u.host;
-          const reqHeaderLines: string[] = [`Host: ${host}`];
-          Object.entries({ 'X-API-KEY': mask(apiKey) }).forEach(([k,v])=>{ reqHeaderLines.push(`${k}: ${v}`); });
-          const requestRaw = [`GET ${pathWithQuery} HTTP/1.1`, ...reqHeaderLines, '', ''].join('\n');
+          const requestPayload = JSON.stringify({ apikey: mask(apiKey) }, null, 2);
+          const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${host}`, `Content-Type: application/json`, '', requestPayload].join('\n');
           const responseRaw = [`HTTP/1.1 0 Network Error`, '', (fetchErr?.message || 'Failed to connect')].join('\n');
           setLog(prev => [
             ...prev,
             {
               id: Date.now(),
               at: new Date().toISOString(),
-              request: { method: 'GET', url: url2, headers: { 'X-API-KEY': mask(apiKey) } },
+              request: { method: 'POST', url: url2, headers: { 'Content-Type': 'application/json' } },
               status: null,
               durationMs: undefined,
               responsePreview: undefined,
@@ -139,28 +129,27 @@ const OpenAlgo = () => {
               responseHeaders: undefined,
               requestRaw,
               responseRaw,
-              requestPayload: null,
+              requestPayload,
             },
           ]);
         }
       }
     } catch (e: any) {
       setError(e?.message || 'Failed to connect');
-  const url = `http://${host}:${port}`.replace(/\/$/, '') + '/funds';
-      // Build raw-like request even for error case
+      const url = `http://${host}:${port}`.replace(/\/$/, '') + '/funds';
+      // Build raw-like request even for error case (POST JSON)
       const u = new URL(url);
       const pathWithQuery = u.pathname + u.search;
-      const host = u.host;
-      const reqHeaderLines: string[] = [`Host: ${host}`];
-      Object.entries({ 'X-API-KEY': mask(apiKey) }).forEach(([k,v])=>{ reqHeaderLines.push(`${k}: ${v}`); });
-      const requestRaw = [`GET ${pathWithQuery} HTTP/1.1`, ...reqHeaderLines, '', ''].join('\n');
+      const uHost = u.host;
+      const requestPayload = JSON.stringify({ apikey: mask(apiKey) }, null, 2);
+      const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${uHost}`, `Content-Type: application/json`, '', requestPayload].join('\n');
       const responseRaw = [`HTTP/1.1 0 Network Error`, '', (e?.message || 'Failed to connect')].join('\n');
       setLog(prev => [
         ...prev,
         {
           id: Date.now(),
           at: new Date().toISOString(),
-          request: { method: 'GET', url, headers: { 'X-API-KEY': mask(apiKey) } },
+          request: { method: 'POST', url, headers: { 'Content-Type': 'application/json' } },
           status: null,
           durationMs: undefined,
           responsePreview: undefined,
@@ -168,7 +157,7 @@ const OpenAlgo = () => {
           responseHeaders: undefined,
           requestRaw,
           responseRaw,
-          requestPayload: null,
+          requestPayload,
         },
       ]);
     } finally {

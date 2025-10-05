@@ -6,7 +6,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "openalgo:funds": "node ./openalgoFundsCli.mjs",
+    "openalgo:funds:local": "node ./openalgoFundsCli.mjs --host 127.0.0.1 --port 5000 --apikey dummy"
   },
   "author": "",
   "license": "ISC",
