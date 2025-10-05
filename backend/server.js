@@ -50,6 +50,43 @@ const readJson = (file, fallback) => {
 };
 const writeJson = (file, data) => { try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); } catch {} };
 
+// Format option symbol like NIFTY28MAR2420800CE
+const monthMap = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const formatOptionSymbol = (underlying, expiryInput, strike, type) => {
+  try {
+    let d = null;
+    if (expiryInput instanceof Date) d = expiryInput;
+    else if (typeof expiryInput === 'string') {
+      // Try common formats
+      // 1) DD-MMM-YYYY or DDMMMYYYY
+      const m1 = expiryInput.match(/^(\d{1,2})[- ]?([A-Za-z]{3})[- ]?(\d{2,4})$/);
+      if (m1) {
+        const dd = parseInt(m1[1],10);
+        const mon = m1[2].toUpperCase();
+        const yy = m1[3].length === 4 ? parseInt(m1[3].slice(-2),10) : parseInt(m1[3],10);
+        const mi = monthMap.indexOf(mon);
+        if (mi >= 0) d = new Date(2000+yy, mi, dd);
+      }
+      if (!d) {
+        const t = Date.parse(expiryInput);
+        if (!Number.isNaN(t)) d = new Date(t);
+      }
+    }
+    if (!d) d = new Date(expiryInput);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mon = monthMap[d.getMonth()];
+    const yy = String(d.getFullYear()).slice(-2);
+    const datePart = `${dd}${mon}${yy}`;
+    const und = String(underlying).toUpperCase();
+    const typ = String(type).toUpperCase();
+    return `${und}${datePart}${Math.round(Number(strike))}${typ}`;
+  } catch {
+    const und = String(underlying).toUpperCase();
+    const typ = String(type).toUpperCase();
+    return `${und}${String(expiryInput)}${Math.round(Number(strike))}${typ}`;
+  }
+};
+
 // Normalize exit object to enforce backend semantics
 const normalizeExit = (exit) => {
   const toPosStr = (v) => {
@@ -426,6 +463,68 @@ app.post('/openalgo/funds', async (req, res) => {
     const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `Content-Type: application/json`, '', requestPayload].join('\n');
     const responseRaw = [`HTTP/1.1 0 Network Error`, '', String(e?.message || 'Failed to connect')].join('\n');
     return res.status(502).json({ error: 'failed to fetch funds', debug: { requestRaw, responseRaw } });
+  }
+});
+
+// POST /openalgo/basket-order
+// Body options:
+// 1) { strategy: string, orders: Array<{ symbol, exchange, action, quantity, pricetype, product }> }
+// 2) { strategy, exchange, product, pricetype, underlying, legs: Array<{ action, type, strike, expiry, quantity }> }
+app.post('/openalgo/basket-order', async (req, res) => {
+  const body = req.body || {};
+  const cfg = readJson(openAlgoConfigFile, {});
+  const key = typeof body.apiKey === 'string' && body.apiKey ? body.apiKey : (cfg.apiKey || '');
+  if (!key) return res.status(400).json({ error: 'apiKey required' });
+  const host = typeof body.host === 'string' && body.host ? body.host : (cfg.host || '127.0.0.1');
+  const port = Number.isInteger(body.port) && body.port > 0 ? body.port : (Number.isInteger(cfg.port) ? cfg.port : 5000);
+  const base = /^https?:\/\//i.test(host) ? host.replace(/\/$/,'') : `http://${host}:${port}`;
+
+  const strategy = typeof body.strategy === 'string' ? body.strategy : 'NodeJS';
+  let orders = Array.isArray(body.orders) ? body.orders : null;
+  if (!orders && Array.isArray(body.legs) && body.underlying) {
+    const exchange = body.exchange || 'NSE';
+    const product = body.product || 'MIS';
+    const pricetype = body.pricetype || 'MARKET';
+    const underlying = body.underlying;
+    orders = body.legs.map(l => ({
+      symbol: formatOptionSymbol(underlying, l.expiry, l.strike, l.type),
+      exchange,
+      action: (l.action || '').toUpperCase(),
+      quantity: Number(l.quantity) || 1,
+      pricetype,
+      product,
+    }));
+  }
+  if (!orders || !Array.isArray(orders) || orders.length === 0) {
+    return res.status(400).json({ error: 'orders or legs required' });
+  }
+
+  const url = `${base}/api/v1/basketorder`;
+  const payload = { apikey: key, strategy, orders };
+  const started = Date.now();
+  try {
+    const axiosRes = await axios.post(url, payload, { validateStatus: () => true });
+    const ms = Date.now() - started;
+    const rawBody = typeof axiosRes.data === 'string' ? axiosRes.data : JSON.stringify(axiosRes.data);
+    const MAX_RAW = 10000;
+    const u = new URL(url);
+    const pathWithQuery = u.pathname + u.search;
+    const hostHeader = u.host;
+    const requestPayload = JSON.stringify({ ...payload, apikey: key.length <= 5 ? '*'.repeat(key.length) : key.slice(0,3)+'***'+key.slice(-2) }, null, 2);
+    const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `Content-Type: application/json`, '', requestPayload].join('\n');
+    const statusLine = `HTTP/1.1 ${axiosRes.status}`;
+    const respHeaderLines = Object.entries(axiosRes.headers || {}).map(([k,v])=>`${k}: ${String(v)}`);
+    const clippedBody = rawBody.length > MAX_RAW ? rawBody.slice(0, MAX_RAW) + `\n…(${rawBody.length - MAX_RAW} more bytes)` : rawBody;
+    const responseRaw = [statusLine, ...respHeaderLines, '', clippedBody].join('\n');
+    return res.status(200).json({ ok: true, data: axiosRes.data, debug: { durationMs: ms, requestRaw, responseRaw, response: { status: axiosRes.status, headers: axiosRes.headers } } });
+  } catch (e) {
+    const u = new URL(url);
+    const pathWithQuery = u.pathname + u.search;
+    const hostHeader = u.host;
+    const requestPayload = JSON.stringify({ ...payload, apikey: key.length <= 5 ? '*'.repeat(key.length) : key.slice(0,3)+'***'+key.slice(-2) }, null, 2);
+    const requestRaw = [`POST ${pathWithQuery} HTTP/1.1`, `Host: ${hostHeader}`, `Content-Type: application/json`, '', requestPayload].join('\n');
+    const responseRaw = [`HTTP/1.1 0 Network Error`, '', String(e?.message || 'Failed to connect')].join('\n');
+    return res.status(502).json({ error: 'failed to place basket', debug: { requestRaw, responseRaw } });
   }
 });
 
