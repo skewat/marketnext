@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState, useContext } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Box, Paper, Typography, Grid, FormControl, InputLabel, Select, MenuItem, Button, Drawer } from '@mui/material';
+import { Box, Paper, Typography, Grid, FormControl, InputLabel, Select, MenuItem, Button, Drawer, Table, TableHead, TableRow, TableCell, TableBody } from '@mui/material';
 import { getUnderlying, setUnderlying as setGlobalUnderlying, setSBATMIVsPerExpiry, setSBFuturesPerExpiry, setSBUnderlyingPrice, setSBTargetUnderlyingPrice, setSBTargetDateTime, setSBOptionLegs, setSBExpiry } from '../../features/selected/selectedSlice';
 import { useOpenInterestQuery } from '../../app/services/openInterest';
 import PNLVisualizer from '../StrategyBuilder/PNLVisualizer';
 import { getTargetDateTime } from '../../utils';
 import type { OptionLeg as OptionLegType } from '../../features/selected/types';
 import { ToastContext } from '../../contexts/ToastContextProvider';
+import { LOTSIZES } from '../../identifiers';
+
+type StoredLeg = OptionLegType & { tradedPrice?: number | null; tradedAt?: number; premiumAtEntry?: number | null };
 
 type Position = {
   id: string;
   name: string;
   underlying: string;
   expiry: string;
-  legs: OptionLegType[];
+  legs: StoredLeg[];
   status: 'open'|'closed'|'scheduled';
   createdAt: number;
   entryAt?: number;
@@ -187,6 +190,39 @@ const Positions = () => {
     })();
   }, [selectedId, data]);
 
+  // Build leg display data: traded vs current price for each leg
+  const legDisplay = useMemo(() => {
+    if (!selectedId || !data) return [] as Array<{ key: string; action: 'B'|'S'; type: 'CE'|'PE'; strike: number; lots: number; tradedPrice: number | null; currentPrice: number | null; tradedAt?: number; premiumAtEntry?: number | null }>; 
+    const pos = positions.find(p => p.id === selectedId);
+    if (!pos) return [];
+    const { grouped } = data as any;
+    const availableExpiries = Object.keys(grouped || {});
+    const useExpiry = availableExpiries.includes(pos.expiry) ? pos.expiry : (availableExpiries[0] || pos.expiry);
+    const g = grouped?.[useExpiry];
+    const rows = (g?.data || []) as any[];
+    const strikes: number[] = rows.map((r:any) => r.strikePrice || r.strike).filter((v:any)=> typeof v==='number');
+    const rowByStrike = new Map<number, any>();
+    for (const r of rows) {
+      const k = (r.strikePrice ?? r.strike) as number;
+      if (typeof k === 'number') rowByStrike.set(k, r);
+    }
+    const snapStrike = (k: number) => {
+      if (!strikes.length) return k;
+      if (strikes.includes(k)) return k;
+      let best = strikes[0]; let bestDiff = Math.abs(best - k);
+      for (const s of strikes) { const d = Math.abs(s - k); if (d < bestDiff) { bestDiff = d; best = s; } }
+      return best;
+    };
+    return (pos.legs || []).map((leg, idx) => {
+      const strike = snapStrike(leg.strike);
+      const row = rowByStrike.get(strike);
+      const currentPrice = leg.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+      const tradedPrice = (typeof leg.tradedPrice === 'number') ? leg.tradedPrice : (typeof (leg as any).price === 'number' ? (leg as any).price : null);
+      const premiumAtEntry = typeof leg.premiumAtEntry === 'number' ? leg.premiumAtEntry : undefined;
+      return { key: `${idx}-${leg.type}-${strike}`, action: leg.action, type: leg.type, strike, lots: leg.lots, tradedPrice, currentPrice, tradedAt: leg.tradedAt, premiumAtEntry };
+    });
+  }, [selectedId, positions, data]);
+
   // Load adjustment note when Adjust drawer opens
   useEffect(() => {
     if (!adjustOpen) {
@@ -287,16 +323,81 @@ const Positions = () => {
           const pos = filtered.find(p => p.id === selectedId);
           if (!pos) return null;
           const isClosed = pos.status === 'closed';
+          const lotSize = LOTSIZES.get(pos.underlying as any) || null;
           if (isClosed) {
             // For closed positions, reuse PNLVisualizer to only render Current PnL card (no chart/other data)
             return (
               <Box>
+                {/* Legs summary table */}
+                {legDisplay.length > 0 && (
+                  <Paper sx={{ mb:2, p:1 }}>
+                    <Typography variant='subtitle1' sx={{ mb:1 }}>Legs</Typography>
+                    <Table size='small'>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Action</TableCell>
+                          <TableCell>Type</TableCell>
+                          <TableCell align='right'>Strike</TableCell>
+                          <TableCell align='right'>Lots</TableCell>
+                          <TableCell align='right'>Traded Price</TableCell>
+                          <TableCell align='right'>Current Price</TableCell>
+                          {lotSize && <TableCell align='right'>Entry Premium</TableCell>}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {legDisplay.map(l => (
+                          <TableRow key={l.key}>
+                            <TableCell>{l.action}</TableCell>
+                            <TableCell>{l.type}</TableCell>
+                            <TableCell align='right'>{l.strike}</TableCell>
+                            <TableCell align='right'>{l.lots}</TableCell>
+                            <TableCell align='right'>{l.tradedPrice != null ? l.tradedPrice.toFixed(2) : '-'}</TableCell>
+                            <TableCell align='right'>{l.currentPrice != null ? l.currentPrice.toFixed(2) : '-'}</TableCell>
+                            {lotSize && <TableCell align='right'>{typeof l.premiumAtEntry === 'number' ? l.premiumAtEntry.toFixed(2) : (l.tradedPrice != null ? (l.tradedPrice * l.lots * lotSize).toFixed(2) : '-')}</TableCell>}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Paper>
+                )}
                 <PNLVisualizer showMargin={false} showCurrentPnL={true} onlyCurrentPnL={true} pnlLabel={'Realised PnL'} />
               </Box>
             );
           }
           return (
             <Box>
+              {/* Legs summary table */}
+              {legDisplay.length > 0 && (
+                <Paper sx={{ mb:2, p:1 }}>
+                  <Typography variant='subtitle1' sx={{ mb:1 }}>Legs</Typography>
+                  <Table size='small'>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Action</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell align='right'>Strike</TableCell>
+                        <TableCell align='right'>Lots</TableCell>
+                        <TableCell align='right'>Traded Price</TableCell>
+                        <TableCell align='right'>Current Price</TableCell>
+                        {lotSize && <TableCell align='right'>Entry Premium</TableCell>}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {legDisplay.map(l => (
+                        <TableRow key={l.key}>
+                          <TableCell>{l.action}</TableCell>
+                          <TableCell>{l.type}</TableCell>
+                          <TableCell align='right'>{l.strike}</TableCell>
+                          <TableCell align='right'>{l.lots}</TableCell>
+                          <TableCell align='right'>{l.tradedPrice != null ? l.tradedPrice.toFixed(2) : '-'}</TableCell>
+                          <TableCell align='right'>{l.currentPrice != null ? l.currentPrice.toFixed(2) : '-'}</TableCell>
+                          {lotSize && <TableCell align='right'>{typeof l.premiumAtEntry === 'number' ? l.premiumAtEntry.toFixed(2) : (l.tradedPrice != null ? (l.tradedPrice * l.lots * lotSize).toFixed(2) : '-')}</TableCell>}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Paper>
+              )}
               <PNLVisualizer showMargin={false} showCurrentPnL={true} />
             </Box>
           );

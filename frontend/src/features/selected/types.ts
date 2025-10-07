@@ -142,6 +142,10 @@ export type OptionLeg = {
   lots: number;
   price: number | null;
   iv: number | null;
+  // Optional fields when persisted in Positions
+  tradedPrice?: number | null;
+  tradedAt?: number;
+  premiumAtEntry?: number | null;
 };
 
 export type TargetDateTime = {

@@ -31,6 +31,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const dataRoot = path.resolve(repoRoot, 'Data');
+const logsRoot = path.resolve(repoRoot, 'logs');
 const oiCacheDir = path.resolve(dataRoot, 'oi-cache');
 const strategyNotesDir = path.resolve(dataRoot, 'strategy-notes');
 const NOTE_MAX_LENGTH = 1000;
@@ -38,6 +39,7 @@ const ensureDir = (dir)=>{ if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursiv
 ensureDir(dataRoot);
 ensureDir(oiCacheDir);
 ensureDir(strategyNotesDir);
+ensureDir(logsRoot);
 
 // JSON file storage for strategies and positions
 const strategiesFile = path.join(dataRoot, 'strategies.json');
@@ -49,6 +51,86 @@ const readJson = (file, fallback) => {
   try { if (!fs.existsSync(file)) return fallback; const t = fs.readFileSync(file, 'utf8'); return JSON.parse(t); } catch { return fallback; }
 };
 const writeJson = (file, data) => { try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); } catch {} };
+
+// --- API logging middleware ---
+const LOG_MAX_BODY = 5000; // truncate large bodies to keep logs light
+const maskValue = (val) => {
+  if (typeof val !== 'string') return val;
+  if (!val) return val;
+  return val.length <= 6 ? '*'.repeat(val.length) : val.slice(0,3) + '***' + val.slice(-3);
+};
+const maskKeys = new Set(['apikey','apiKey','authorization','Authorization','x-api-key','X-API-KEY']);
+const maskObject = (obj) => {
+  try {
+    if (!obj || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(maskObject);
+    const o = {};
+    for (const [k,v] of Object.entries(obj)) {
+      if (maskKeys.has(k)) o[k] = maskValue(typeof v === 'string' ? v : JSON.stringify(v));
+      else if (v && typeof v === 'object') o[k] = maskObject(v);
+      else o[k] = v;
+    }
+    return o;
+  } catch { return obj; }
+};
+const clip = (str) => {
+  try {
+    const s = typeof str === 'string' ? str : JSON.stringify(str);
+    return s.length > LOG_MAX_BODY ? s.slice(0, LOG_MAX_BODY) + `\n…(${s.length - LOG_MAX_BODY} more bytes)` : s;
+  } catch { return String(str); }
+};
+const logLine = (entry) => {
+  try {
+    const day = new Date();
+    const yyyy = String(day.getFullYear());
+    const mm = String(day.getMonth()+1).padStart(2,'0');
+    const dd = String(day.getDate()).padStart(2,'0');
+    const file = path.join(logsRoot, `api-${yyyy}-${mm}-${dd}.jsonl`);
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n');
+  } catch {}
+};
+
+app.use((req, res, next) => {
+  const started = Date.now();
+  const reqHeaders = maskObject(req.headers || {});
+  const reqBodyMasked = maskObject(req.body || {});
+  let resBodyCache = undefined;
+  const origJson = res.json.bind(res);
+  const origSend = res.send.bind(res);
+
+  res.json = (data) => { resBodyCache = data; return origJson(data); };
+  res.send = (data) => { resBodyCache = data; return origSend(data); };
+
+  res.on('finish', () => {
+    try {
+      const durationMs = Date.now() - started;
+      // Prepare response body string, masking if JSON
+      let resBodyStr = '';
+      if (resBodyCache !== undefined) {
+        try { resBodyStr = typeof resBodyCache === 'string' ? resBodyCache : JSON.stringify(maskObject(resBodyCache)); }
+        catch { resBodyStr = String(resBodyCache); }
+      }
+      const entry = {
+        ts: new Date().toISOString(),
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl || req.url,
+        status: res.statusCode,
+        durationMs,
+        request: {
+          headers: reqHeaders,
+          query: maskObject(req.query || {}),
+          body: clip(JSON.stringify(reqBodyMasked)),
+        },
+        response: {
+          body: clip(resBodyStr),
+        },
+      };
+      logLine(entry);
+    } catch {}
+  });
+  next();
+});
 
 // Format option symbol like NIFTY28MAR2420800CE
 const monthMap = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
@@ -291,6 +373,13 @@ app.post('/positions', (req, res) => {
   const createdAt = typeof pos.createdAt === 'number' ? pos.createdAt : now;
   const entryAt = typeof pos.entryAt === 'number' ? pos.entryAt : createdAt;
   const status = pos.status === 'closed' || pos.status === 'scheduled' ? pos.status : 'open';
+  // Record tradedPrice/tradedAt per leg if not provided
+  const legs = Array.isArray(pos.legs) ? pos.legs.map((leg) => ({
+    ...leg,
+    tradedPrice: (leg && typeof leg.tradedPrice === 'number') ? leg.tradedPrice : (typeof leg.price === 'number' ? leg.price : null),
+    tradedAt: (leg && typeof leg.tradedAt === 'number') ? leg.tradedAt : now,
+    premiumAtEntry: (leg && typeof leg.premiumAtEntry === 'number') ? leg.premiumAtEntry : (typeof leg.price === 'number' ? (leg.price * (leg.lots || 1)) : null),
+  })) : [];
   const withId = { 
     ...pos, 
     id, 
@@ -299,7 +388,8 @@ app.post('/positions', (req, res) => {
     entryAt,
     updatedAt: now,
     exitAt: typeof pos.exitAt === 'number' ? pos.exitAt : (status === 'closed' ? now : undefined),
-    exit: normalizeExit(pos.exit)
+    exit: normalizeExit(pos.exit),
+    legs,
   };
   list.push(withId);
   writeJson(positionsFile, list);
@@ -323,6 +413,22 @@ app.patch('/positions/:id', (req, res) => {
   }
   if (!merged.createdAt) merged.createdAt = prev.createdAt || now;
   if (!merged.entryAt) merged.entryAt = prev.entryAt || merged.createdAt;
+  // Backfill leg fields if legs provided
+  if (Array.isArray(merged.legs)) {
+    merged.legs = merged.legs.map((leg, i) => {
+      const prevLeg = Array.isArray(prev.legs) ? prev.legs[i] : undefined;
+      const tradedPrice = (leg && typeof leg.tradedPrice === 'number') ? leg.tradedPrice
+        : (prevLeg && typeof prevLeg.tradedPrice === 'number') ? prevLeg.tradedPrice
+        : (typeof leg.price === 'number' ? leg.price : null);
+      const tradedAt = (leg && typeof leg.tradedAt === 'number') ? leg.tradedAt
+        : (prevLeg && typeof prevLeg.tradedAt === 'number') ? prevLeg.tradedAt
+        : now;
+      const premiumAtEntry = (leg && typeof leg.premiumAtEntry === 'number') ? leg.premiumAtEntry
+        : (prevLeg && typeof prevLeg.premiumAtEntry === 'number') ? prevLeg.premiumAtEntry
+        : (typeof tradedPrice === 'number' ? (tradedPrice * (leg?.lots || prevLeg?.lots || 1)) : null);
+      return { ...leg, tradedPrice, tradedAt, premiumAtEntry };
+    });
+  }
   merged.exit = normalizeExit(merged.exit);
   list[idx] = merged;
   writeJson(positionsFile, list);
