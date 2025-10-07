@@ -192,7 +192,7 @@ const Positions = () => {
 
   // Build leg display data: traded vs current price for each leg
   const legDisplay = useMemo(() => {
-  if (!selectedId || !data) return [] as Array<{ key: string; action: 'B'|'S'; type: 'CE'|'PE'; strike: number; lots: number; tradedPrice: number | null; currentPrice: number | null; tradedAt?: number; premiumAtEntry?: number | null }>; 
+    if (!selectedId || !data) return [] as Array<{ key: string; action: 'B'|'S'; type: 'CE'|'PE'; strike: number; lots: number; tradedPrice: number | null; currentPrice: number | null; tradedAt?: number; premiumAtEntry?: number | null; expiryShort: string }>; 
     const pos = positions.find(p => p.id === selectedId);
     if (!pos) return [];
     const { grouped } = data as any;
@@ -219,7 +219,9 @@ const Positions = () => {
       const currentPrice = leg.type === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
       const tradedPrice = (typeof leg.tradedPrice === 'number') ? leg.tradedPrice : (typeof (leg as any).price === 'number' ? (leg as any).price : null);
       const premiumAtEntry = typeof leg.premiumAtEntry === 'number' ? leg.premiumAtEntry : undefined;
-      return { key: `${idx}-${leg.type}-${strike}`, action: leg.action, type: leg.type, strike, lots: leg.lots, tradedPrice, currentPrice, tradedAt: leg.tradedAt, premiumAtEntry };
+      const expFull = (leg.expiry || useExpiry) as string;
+      const expiryShort = typeof expFull === 'string' ? expFull.replace(/-\d{4}$/,'') : '';
+      return { key: `${idx}-${leg.type}-${strike}`, action: leg.action, type: leg.type, strike, lots: leg.lots, tradedPrice, currentPrice, tradedAt: leg.tradedAt, premiumAtEntry, expiryShort };
     });
   }, [selectedId, positions, data]);
 
@@ -337,12 +339,14 @@ const Positions = () => {
                         <TableRow>
                           <TableCell>Action</TableCell>
                           <TableCell>Type</TableCell>
+                          <TableCell>Expiry</TableCell>
                           <TableCell align='right'>Strike</TableCell>
                           <TableCell align='right'>Lots</TableCell>
                           <TableCell align='right'>Traded Price</TableCell>
                           <TableCell align='right'>Current Price</TableCell>
                           {lotSize && <TableCell align='right'>Entry Premium</TableCell>}
                           {lotSize && <TableCell align='right'>Current Premium</TableCell>}
+                          {lotSize && <TableCell align='right'>PnL</TableCell>}
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -350,16 +354,19 @@ const Positions = () => {
                           const sign = l.action === 'B' ? -1 : 1;
                           const entryPrem = (l.tradedPrice != null && lotSize) ? sign * l.tradedPrice * l.lots * lotSize : null;
                           const currentPrem = (l.currentPrice != null && lotSize) ? sign * l.currentPrice * l.lots * lotSize : null;
+                          const legPnl = (entryPrem != null && currentPrem != null) ? (currentPrem - entryPrem) : null;
                           return (
                             <TableRow key={l.key}>
                               <TableCell>{l.action}</TableCell>
                               <TableCell>{l.type}</TableCell>
+                              <TableCell>{l.expiryShort}</TableCell>
                               <TableCell align='right'>{l.strike}</TableCell>
                               <TableCell align='right'>{l.lots}</TableCell>
                               <TableCell align='right'>{l.tradedPrice != null ? l.tradedPrice.toFixed(2) : '-'}</TableCell>
                               <TableCell align='right'>{l.currentPrice != null ? l.currentPrice.toFixed(2) : '-'}</TableCell>
                               {lotSize && <TableCell align='right'>{entryPrem != null ? (entryPrem >= 0 ? `+${entryPrem.toFixed(2)}` : entryPrem.toFixed(2)) : '-'}</TableCell>}
                               {lotSize && <TableCell align='right'>{currentPrem != null ? (currentPrem >= 0 ? `+${currentPrem.toFixed(2)}` : currentPrem.toFixed(2)) : '-'}</TableCell>}
+                              {lotSize && <TableCell align='right'>{legPnl != null ? (legPnl >= 0 ? `+${legPnl.toFixed(2)}` : legPnl.toFixed(2)) : '-'}</TableCell>}
                             </TableRow>
                           );
                         })}
@@ -382,12 +389,14 @@ const Positions = () => {
                       <TableRow>
                         <TableCell>Action</TableCell>
                         <TableCell>Type</TableCell>
+                        <TableCell>Expiry</TableCell>
                         <TableCell align='right'>Strike</TableCell>
                         <TableCell align='right'>Lots</TableCell>
                         <TableCell align='right'>Traded Price</TableCell>
                         <TableCell align='right'>Current Price</TableCell>
                         {lotSize && <TableCell align='right'>Entry Premium</TableCell>}
                         {lotSize && <TableCell align='right'>Current Premium</TableCell>}
+                        {lotSize && <TableCell align='right'>PnL</TableCell>}
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -395,16 +404,19 @@ const Positions = () => {
                         const sign = l.action === 'B' ? -1 : 1;
                         const entryPrem = (l.tradedPrice != null && lotSize) ? sign * l.tradedPrice * l.lots * lotSize : null;
                         const currentPrem = (l.currentPrice != null && lotSize) ? sign * l.currentPrice * l.lots * lotSize : null;
+                        const legPnl = (entryPrem != null && currentPrem != null) ? (currentPrem - entryPrem) : null;
                         return (
                           <TableRow key={l.key}>
                             <TableCell>{l.action}</TableCell>
                             <TableCell>{l.type}</TableCell>
+                            <TableCell>{l.expiryShort}</TableCell>
                             <TableCell align='right'>{l.strike}</TableCell>
                             <TableCell align='right'>{l.lots}</TableCell>
                             <TableCell align='right'>{l.tradedPrice != null ? l.tradedPrice.toFixed(2) : '-'}</TableCell>
                             <TableCell align='right'>{l.currentPrice != null ? l.currentPrice.toFixed(2) : '-'}</TableCell>
                             {lotSize && <TableCell align='right'>{entryPrem != null ? (entryPrem >= 0 ? `+${entryPrem.toFixed(2)}` : entryPrem.toFixed(2)) : '-'}</TableCell>}
                             {lotSize && <TableCell align='right'>{currentPrem != null ? (currentPrem >= 0 ? `+${currentPrem.toFixed(2)}` : currentPrem.toFixed(2)) : '-'}</TableCell>}
+                            {lotSize && <TableCell align='right'>{legPnl != null ? (legPnl >= 0 ? `+${legPnl.toFixed(2)}` : legPnl.toFixed(2)) : '-'}</TableCell>}
                           </TableRow>
                         );
                       })}
