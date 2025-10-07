@@ -1,5 +1,7 @@
 import { useMemo, useState, useContext, useEffect } from 'react';
-import { Box, Grid, Typography, TextField, Checkbox, FormControlLabel, Button, Paper, Select, MenuItem, FormControl, InputLabel, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { Box, Grid, Typography, TextField, Checkbox, FormControlLabel, Button, Paper, Select, MenuItem, FormControl, InputLabel, ToggleButton, ToggleButtonGroup, IconButton } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
 import { useSelector, useDispatch } from 'react-redux';
 import { getUnderlying, setSBOptionLegs, setSBExpiry, setSBFuturesPerExpiry, setSBATMIVsPerExpiry, setSBUnderlyingPrice, setSBTargetUnderlyingPrice, setSBTargetDateTime } from '../../features/selected/selectedSlice';
 import { useOpenInterestQuery } from '../../app/services/openInterest';
@@ -10,6 +12,7 @@ import type { OptionLeg as OptionLegType } from '../../features/selected/types';
 
 // Types
 type ScheduledLeg = { id:string; expiry:string; offsetFromATM:number; optionType:'CE'|'PE'; action:'B'|'S'; strike?: number; premium?: number | null };
+type PreviewLeg = ScheduledLeg & { delta?: number | null; lots?: number };
 
 type SchedulerConfig = {
   // Core deploy settings
@@ -85,6 +88,7 @@ const Scheduler = () => {
   };
   const [savedMap, setSavedMap] = useState<Record<string, SavedStrategy>>({});
   const [savedNames, setSavedNames] = useState<string[]>([]);
+  const [editableLegs, setEditableLegs] = useState<PreviewLeg[]>([]);
 
   // Handlers
   const handleChange = (k: keyof SchedulerConfig, v:any)=> setCfg(p=>({ ...p, [k]: v }));
@@ -131,6 +135,33 @@ const Scheduler = () => {
     return legs;
   };
 
+  // Build legs from current editableLegs state (preferred when editing strikes)
+  const buildLegsFromEditable = (): OptionLegType[] => {
+    const d: any = data;
+    if (!d || !selectedActualExpiry || editableLegs.length === 0) return [];
+    const grouped = d.grouped;
+    const g = grouped?.[selectedActualExpiry];
+    const rows = (g?.data || []) as any[];
+    const strikes: number[] = rows.map((r:any)=> r.strikePrice || r.strike).filter((v:any)=> typeof v==='number');
+    const fut = g?.syntheticFuturesPrice ?? null;
+    const rowByStrike = new Map<number, any>();
+    for (const r of rows) { const k = (r.strikePrice ?? r.strike) as number; if (typeof k === 'number') rowByStrike.set(k, r); }
+    if (!strikes.length || fut === null) return [];
+    const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-fut) < Math.abs(prev-fut) ? curr : prev, strikes[0]);
+    const atmIdx = Math.max(0, strikes.findIndex((s:number)=>s===nearest));
+    const out: OptionLegType[] = [];
+  for (const leg of editableLegs) {
+      let idx = atmIdx + (leg.offsetFromATM||0);
+      if (idx < 0) idx = 0; if (idx > strikes.length-1) idx = strikes.length-1;
+      const strike = strikes[idx];
+      const row = rowByStrike.get(strike);
+      const price = leg.optionType === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+      const iv = row?.iv ?? null;
+      out.push({ active: true, action: leg.action, expiry: leg.expiry, strike, type: leg.optionType, lots: Math.max(1, (leg.lots||1)), price, iv } as OptionLegType);
+    }
+    return out;
+  };
+
   const handleDeploy = async ()=> {
     if (!selectedStrategyName) {
       setToastPack(p=>[...p,{key:Date.now(),type:'error',message:'Select a saved strategy to deploy'}]); setOpen(true); return;
@@ -166,7 +197,7 @@ const Scheduler = () => {
     setToastPack(p=>[...p,{key:Date.now(),type:'success',message:`Deploying now: ${selectedStrategyName}`}]);
     // Save as an open position to backend
     try {
-      const legs = buildLegsForSelected();
+      const legs = editableLegs.length ? buildLegsFromEditable() : buildLegsForSelected();
       await postPosition({ name: selectedStrategyName, underlying, expiry, legs, status: 'open', createdAt: Date.now(), exit: { mode: (cfg.exitMode||'onExpiry') as any, stopLossPct: cfg.stopLossPct, stopLossAbs: cfg.stopLossAbs, profitTargetPct: cfg.profitTargetPct, trailingEnabled: cfg.trailingEnabled } });
     } catch (e) {
       setToastPack(p=>[...p,{key:Date.now(),type:'error',message:'Failed to deploy position'}]);
@@ -333,7 +364,8 @@ const Scheduler = () => {
       const k = (r.strikePrice ?? r.strike) as number;
       if (typeof k === 'number') rowByStrike.set(k, r);
     }
-    const absLegs: OptionLegType[] = [];
+  const absLegs: OptionLegType[] = [];
+  const preview: PreviewLeg[] = [];
     for (const item of (saved.optionLegs || []) as any[]) {
       let strike: number | null = null;
       if (item?.strikeRef?.kind === 'ATM' && fut !== null && strikes.length) {
@@ -368,63 +400,59 @@ const Scheduler = () => {
           price: price,
           iv: iv,
         } as OptionLegType);
+        // Preview leg with computed offset and greeks delta
+        let offsetFromATM = 0;
+        if (strikes.length && fut !== null) {
+          const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-fut) < Math.abs(prev-fut) ? curr : prev, strikes[0]);
+          const atmIdx2 = Math.max(0, strikes.findIndex((s:number)=>s===nearest));
+          const legIdx = Math.max(0, strikes.findIndex((s:number)=>s===strike));
+          offsetFromATM = legIdx - atmIdx2;
+        }
+        const delta = item.type === 'CE' ? (row?.CE?.greeks?.delta ?? null) : (row?.PE?.greeks?.delta ?? null);
+        preview.push({ id: Math.random().toString(36).slice(2), expiry: selectedActualExpiry, offsetFromATM, optionType: item.type, action: item.action, strike, premium: price ?? null, delta, lots: Math.max(1, Number(item.lots)||1) });
       }
     }
+    setEditableLegs(preview);
     dispatch(setSBOptionLegs({ type: 'set', optionLegs: absLegs } as any));
     dispatch(setSBExpiry(selectedActualExpiry));
   }, [data, selectedStrategyName, selectedActualExpiry, underlying]);
 
-  // Build a preview of legs as offsets for the selected strategy (read-only)
-  const legsPreview: ScheduledLeg[] = useMemo(()=>{
-    if (!selectedStrategyName) return [];
-    const useExpiry = selectedActualExpiry;
-    if (!useExpiry) return [];
-    const saved = savedMap[selectedStrategyName];
-    if (!saved) return [];
-    const g = (data as any)?.grouped?.[useExpiry];
+  // Re-dispatch SB legs when editable preview changes (keep chart, metrics in sync)
+  useEffect(()=>{
+    if (!editableLegs.length) return;
+    const legs = buildLegsFromEditable();
+    if (legs.length) {
+      dispatch(setSBOptionLegs({ type: 'set', optionLegs: legs } as any));
+      // Nudge target datetime to force recompute and refresh payoff chart consistently
+      dispatch(setSBTargetDateTime({ value: getTargetDateTime().toISOString(), autoUpdate: true } as any));
+    }
+  }, [editableLegs]);
+
+  // Step a single leg's strike by +/- 1 offset and recompute strike/premium/delta
+  const stepLeg = (id: string, dir: -1 | 1) => {
+    const d: any = data; if (!d || !selectedActualExpiry) return;
+    const g = d.grouped?.[selectedActualExpiry];
     const rows = (g?.data || []) as any[];
-    const strikes: number[] = rows.map(r => r.strikePrice || r.strike).filter((v)=> typeof v==='number');
-    const fut = g?.syntheticFuturesPrice ?? null;
+    const strikes: number[] = rows.map((r:any)=> r.strikePrice || r.strike).filter((v:any)=> typeof v==='number');
+    const fut = g?.syntheticFuturesPrice ?? null; if (!strikes.length || fut === null) return;
     const rowByStrike = new Map<number, any>();
-    for (const r of rows) {
-      const k = (r.strikePrice ?? r.strike) as number;
-      if (typeof k === 'number') rowByStrike.set(k, r);
-    }
-    const result: ScheduledLeg[] = [];
-    for (const item of saved.optionLegs as any[]) {
-      if (item?.strikeRef?.kind === 'ATM') {
-        let strike: number | undefined = undefined;
-        let premium: number | null | undefined = undefined;
-        if (strikes.length && fut !== null) {
-          const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-fut) < Math.abs(prev-fut) ? curr : prev, strikes[0]);
-          const atmIdx = Math.max(0, strikes.findIndex(s=>s===nearest));
-          let idx = atmIdx + (item.strikeRef.offset as number);
-          if (idx < 0) idx = 0;
-          if (idx > strikes.length-1) idx = strikes.length-1;
-          strike = strikes[idx];
-          const row = rowByStrike.get(strike);
-          premium = item.type === 'CE' ? row?.CE?.lastPrice ?? null : row?.PE?.lastPrice ?? null;
-        }
-        result.push({ id: item.id || Math.random().toString(36).slice(2), expiry: useExpiry, offsetFromATM: item.strikeRef.offset, optionType: item.type, action: item.action, strike, premium: premium ?? null });
-      } else if (item && typeof item.strike === 'number') {
-        // Legacy absolute-strike: derive offset against the selected expiry
-        if (!strikes.length || fut === null) continue;
-        const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-fut) < Math.abs(prev-fut) ? curr : prev, strikes[0]);
-        const atmIdx = Math.max(0, strikes.findIndex(s=>s===nearest));
-        let legIdx = strikes.findIndex(s=>s===item.strike);
-        if (legIdx < 0) {
-          let bestIdx = 0; let bestDiff = Number.POSITIVE_INFINITY;
-          for (let i=0;i<strikes.length;i++){ const d = Math.abs(strikes[i]-item.strike); if (d<bestDiff){bestDiff=d; bestIdx=i;} }
-          legIdx = bestIdx;
-        }
-        const strike = strikes[legIdx];
-        const row = rowByStrike.get(strike);
-        const premium = item.type === 'CE' ? row?.CE?.lastPrice ?? null : row?.PE?.lastPrice ?? null;
-        result.push({ id: Math.random().toString(36).slice(2), expiry: useExpiry, offsetFromATM: legIdx - atmIdx, optionType: item.type, action: item.action, strike, premium });
-      }
-    }
-    return result;
-  }, [selectedStrategyName, selectedActualExpiry, underlying, data, savedMap]);
+    for (const r of rows) { const k = (r.strikePrice ?? r.strike) as number; if (typeof k === 'number') rowByStrike.set(k, r); }
+    const nearest = strikes.reduce((prev,curr)=> Math.abs(curr-fut) < Math.abs(prev-fut) ? curr : prev, strikes[0]);
+    const atmIdx = Math.max(0, strikes.findIndex((s:number)=>s===nearest));
+    setEditableLegs(prev => prev.map(l => {
+      if (l.id !== id) return l;
+      let nextOffset = (l.offsetFromATM||0) + dir;
+      let idx = atmIdx + nextOffset; if (idx < 0) { idx = 0; nextOffset = -atmIdx; }
+      if (idx > strikes.length-1) { idx = strikes.length-1; nextOffset = (strikes.length-1) - atmIdx; }
+      const strike = strikes[idx];
+      const row = rowByStrike.get(strike);
+      const premium = l.optionType === 'CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+      const delta = l.optionType === 'CE' ? (row?.CE?.greeks?.delta ?? null) : (row?.PE?.greeks?.delta ?? null);
+      return { ...l, offsetFromATM: nextOffset, strike, premium, delta };
+    }));
+  };
+
+  // Deprecated preview block replaced by editableLegs
 
   return (
     <Box sx={{ p:{xs:2, md:3}, display:'flex', flexDirection:'column', gap:2 }}>
@@ -469,25 +497,45 @@ const Scheduler = () => {
                 </Typography>
               )}
             </Grid>
-            {legsPreview.length>0 && (
+              {editableLegs.length>0 && (
               <Grid item xs={12}>
-                <Box sx={{ border:1, borderColor:'divider', borderRadius:1, overflow:'hidden' }}>
-                  <Box sx={{ display:'flex', p:0.75, backgroundColor:'background.default', fontSize:11, fontWeight:600 }}>
-                    <Box sx={{ flex:1 }}>Expiry</Box>
-                    <Box sx={{ width:130 }}>Strike Ref</Box>
-                    <Box sx={{ width:100 }}>Strike</Box>
-                    <Box sx={{ width:90 }}>Premium</Box>
-                    <Box sx={{ width:60 }}>Type</Box>
-                    <Box sx={{ width:60 }}>Action</Box>
+                <Box sx={{ border:1, borderColor:'divider', borderRadius:1, overflowX:'auto' }}>
+                  {/* Column layout */}
+                  <Box sx={{ display:'grid', gridTemplateColumns:'repeat(8, minmax(120px, 1fr))', columnGap: 1, alignItems:'center', p:0.75, backgroundColor:'background.default', fontSize:11, fontWeight:600, minWidth:960 }}>
+                    <Box sx={{ textAlign:'left' }}>Expiry</Box>
+                    <Box sx={{ textAlign:'center' }}>Strike Ref</Box>
+                    <Box sx={{ textAlign:'center' }}>Strike</Box>
+                    <Box sx={{ textAlign:'right' }}>Premium</Box>
+                    <Box sx={{ textAlign:'right' }}>Delta</Box>
+                    <Box sx={{ textAlign:'center' }}>Lots</Box>
+                    <Box sx={{ textAlign:'center' }}>Type</Box>
+                    <Box sx={{ textAlign:'center' }}>Action</Box>
                   </Box>
-                  {legsPreview.map(leg => (
-                    <Box key={leg.id} sx={{ display:'flex', alignItems:'center', px:0.75, py:0.5, fontSize:11, borderTop:1, borderTopColor:'divider' }}>
-                      <Box sx={{ flex:1 }}>{leg.expiry}</Box>
-                      <Box sx={{ width:130 }}>{leg.offsetFromATM===0 ? 'ATM' : (leg.offsetFromATM>0 ? `ATM+${leg.offsetFromATM}` : `ATM${leg.offsetFromATM}`)}</Box>
-                      <Box sx={{ width:100 }}>{typeof leg.strike==='number' ? leg.strike : '-'}</Box>
-                      <Box sx={{ width:90 }}>{typeof leg.premium==='number' ? leg.premium.toFixed(2) : '-'}</Box>
-                      <Box sx={{ width:60 }}>{leg.optionType}</Box>
-                      <Box sx={{ width:60 }}>{leg.action==='B'?'BUY':'SELL'}</Box>
+                  {editableLegs.map(leg => (
+                    <Box key={leg.id} sx={{ display:'grid', gridTemplateColumns:'repeat(8, minmax(120px, 1fr))', columnGap: 1, alignItems:'center', px:0.75, py:0.6, fontSize:11, borderTop:1, borderTopColor:'divider', minWidth:960 }}>
+                      <Box sx={{ textAlign:'left' }}>{leg.expiry}</Box>
+                      <Box sx={{ textAlign:'center' }}>{leg.offsetFromATM===0 ? 'ATM' : (leg.offsetFromATM>0 ? `ATM+${leg.offsetFromATM}` : `ATM${leg.offsetFromATM}`)}</Box>
+                      <Box sx={{ display:'grid', gridTemplateColumns:'20px auto 20px', alignItems:'center', justifyContent:'center', columnGap:0.5 }}>
+                        <IconButton size='small' aria-label='decrease strike' sx={{ p:0, height:20, width:20, minWidth:20, minHeight:20 }} onClick={()=>stepLeg(leg.id, -1)}>
+                          <RemoveIcon fontSize='inherit' />
+                        </IconButton>
+                        <Box sx={{ textAlign:'center', fontVariantNumeric:'tabular-nums', px:0.25 }}>{typeof leg.strike==='number' ? leg.strike : '-'}</Box>
+                        <IconButton size='small' aria-label='increase strike' sx={{ p:0, height:20, width:20, minWidth:20, minHeight:20 }} onClick={()=>stepLeg(leg.id, +1 as 1)}>
+                          <AddIcon fontSize='inherit' />
+                        </IconButton>
+                      </Box>
+                      <Box sx={{ textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{typeof leg.premium==='number' ? (leg.premium>=0?`+ ${leg.premium.toFixed(2)}`:`− ${Math.abs(leg.premium).toFixed(2)}`) : '-'}</Box>
+                      <Box sx={{ textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{typeof leg.delta==='number' ? leg.delta.toFixed(2) : '-'}</Box>
+                      <Box sx={{ display:'flex', justifyContent:'center' }}>
+                        <TextField size='small' type='number' value={Math.max(1, Number(leg.lots||1))}
+                          onChange={e=>{
+                            const v = Math.max(1, parseInt(e.target.value || '1', 10) || 1);
+                            setEditableLegs(prev => prev.map(l => l.id===leg.id ? { ...l, lots: v } : l));
+                          }}
+                          inputProps={{ min:1, step:1 }} sx={{ width:72 }} />
+                      </Box>
+                      <Box sx={{ textAlign:'center' }}>{leg.optionType}</Box>
+                      <Box sx={{ textAlign:'center' }}>{leg.action==='B'?'BUY':'SELL'}</Box>
                     </Box>
                   ))}
                 </Box>
@@ -498,7 +546,6 @@ const Scheduler = () => {
 
         {/* Deploy controls + button */}
         <Box>
-          <Typography variant='subtitle1' sx={{ fontWeight:600, mb:1 }}>Deploy</Typography>
           <Grid container spacing={1.5} alignItems='center'>
             <Grid item>
               <ToggleButtonGroup value={cfg.deployMode} exclusive onChange={(_,v)=> v && handleChange('deployMode', v)} size='small'>
@@ -539,7 +586,6 @@ const Scheduler = () => {
 
         {/* Exit conditions */}
         <Box>
-          <Typography variant='subtitle1' sx={{ fontWeight:600, mb:1 }}>Exit conditions</Typography>
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={2}><TextField size='small' label='Profit target %' type='number' fullWidth value={cfg.profitTargetPct} onChange={e=>handleChange('profitTargetPct', e.target.value)} inputProps={{min:0,step:'any'}} /></Grid>
             <Grid item xs={12} md={2}><TextField size='small' label='Stop loss %' type='number' fullWidth value={cfg.stopLossPct} onChange={e=>handleChange('stopLossPct', e.target.value)} inputProps={{min:0,step:'any'}} disabled={(cfg.exitMode||'onExpiry')!=='stopLossPct'} /></Grid>
