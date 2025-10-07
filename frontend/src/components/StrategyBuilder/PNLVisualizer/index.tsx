@@ -12,9 +12,9 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import LineAxisIcon from '@mui/icons-material/LineAxis';
 
-type Props = { showMargin?: boolean; showCurrentPnL?: boolean; onlyCurrentPnL?: boolean; pnlLabel?: string };
+type Props = { showMargin?: boolean; showCurrentPnL?: boolean; onlyCurrentPnL?: boolean; pnlLabel?: string; overrideCurrentPnL?: number };
 
-const PNLVisualizer = ({ showMargin = true, showCurrentPnL = false, onlyCurrentPnL = false, pnlLabel }: Props) => {
+const PNLVisualizer = ({ showMargin = true, showCurrentPnL = false, onlyCurrentPnL = false, pnlLabel, overrideCurrentPnL }: Props) => {
   const dispatch = useDispatch();
   const underlying = useSelector(getUnderlying);
   const lotSize = LOTSIZES.get(underlying) || null;
@@ -61,6 +61,23 @@ const PNLVisualizer = ({ showMargin = true, showCurrentPnL = false, onlyCurrentP
 
   }, [builderData]);
 
+  // If an overrideCurrentPnL is provided (Positions page), adjust the chart point at current underlying
+  const adjustedPayoffsAtTarget = useMemo(() => {
+    if (!builderData) return filteredPayoffsAtTarget;
+    if (typeof overrideCurrentPnL !== 'number') return filteredPayoffsAtTarget;
+    const x = builderData.underlyingPrice;
+    // find nearest point by minimal |at - x|
+    let idx = -1; let bestDiff = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < filteredPayoffsAtTarget.length; i++) {
+      const d = Math.abs(filteredPayoffsAtTarget[i].at - x);
+      if (d < bestDiff) { bestDiff = d; idx = i; }
+    }
+    if (idx === -1) return filteredPayoffsAtTarget;
+    const cloned = filteredPayoffsAtTarget.slice();
+    cloned[idx] = { ...cloned[idx], payoff: overrideCurrentPnL };
+    return cloned;
+  }, [filteredPayoffsAtTarget, builderData, overrideCurrentPnL]);
+
   const filteredPayoffsAtExpiry = useMemo(() => {
 
     if (!builderData) return [];
@@ -88,11 +105,11 @@ const PNLVisualizer = ({ showMargin = true, showCurrentPnL = false, onlyCurrentP
   } else if (!onlyCurrentPnL) {
     content = (
       <PNLChart 
-        payoffsAtTarget={filteredPayoffsAtTarget}
+        payoffsAtTarget={adjustedPayoffsAtTarget}
         payoffsAtExpiry={filteredPayoffsAtExpiry}
         underlyingPrice={builderData?.underlyingPrice || 0}
         targetUnderlyingPrice={builderData?.targetUnderlyingPrice || 0}
-        payoffAtTarget={builderData?.payoffAtTarget || 0}
+        payoffAtTarget={typeof overrideCurrentPnL === 'number' ? overrideCurrentPnL : (builderData?.payoffAtTarget || 0)}
         isFetching={isFetching}
         isError={isError}
         error={"Something went wrong"} 
@@ -118,7 +135,7 @@ const PNLVisualizer = ({ showMargin = true, showCurrentPnL = false, onlyCurrentP
           <StrategyMetrics 
             metrics={builderData.strategyMetrics} 
             showMargin={showMargin} 
-            currentPnL={showCurrentPnL ? builderData?.payoffAtTarget : undefined}
+            currentPnL={showCurrentPnL ? (typeof overrideCurrentPnL === 'number' ? overrideCurrentPnL : builderData?.payoffAtTarget) : undefined}
             onlyCurrentPnL={onlyCurrentPnL}
             pnlLabel={pnlLabel}
           />
