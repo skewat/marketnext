@@ -79,6 +79,7 @@ const Positions = () => {
   const [noteEditMode, setNoteEditMode] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const NOTE_MAX = 1000;
+  const [isExiting, setIsExiting] = useState(false);
 
   // Helper to check if a timestamp is on the same local day as today
   const isSameLocalDay = (ms?: number) => {
@@ -247,16 +248,82 @@ const Positions = () => {
       .finally(() => setNoteLoading(false));
   }, [adjustOpen, selectedId, positions]);
 
-  const handleExit = async () => {
-    if (!selectedId) return;
-    const updated = await patchPosition(selectedId, { status: 'closed' });
-    if (updated) {
-      setPositions(prev => prev.map(p => p.id === selectedId ? (updated as Position) : p));
-      setToastPack(p=>[...p,{ key: Date.now(), type: 'success', message: 'Position exited' }]);
-    } else {
-      setToastPack(p=>[...p,{ key: Date.now(), type: 'error', message: 'Failed to exit position' }]);
+  // Exit now handled via reverse orders (handleReverseExit)
+
+  // Broker symbol helpers (DDMONYY format)
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] as const;
+  const toExpiryCode = (expiryInput: string | Date): string => {
+    try {
+      let d: Date | null = null;
+      if (expiryInput instanceof Date) d = expiryInput;
+      else if (typeof expiryInput === 'string') {
+        const m1 = expiryInput.match(/^(\d{1,2})[- ]?([A-Za-z]{3})[- ]?(\d{2,4})$/);
+        if (m1) {
+          const dd = parseInt(m1[1],10);
+          const mon = m1[2].toUpperCase();
+          const yy = m1[3].length === 4 ? parseInt(m1[3].slice(-2),10) : parseInt(m1[3],10);
+          const mi = MONTHS.indexOf(mon as any);
+          if (mi >= 0) d = new Date(2000+yy, mi, dd);
+        }
+        if (!d) {
+          const t = Date.parse(expiryInput);
+          if (!Number.isNaN(t)) d = new Date(t);
+        }
+      }
+      if (!d) d = new Date(expiryInput as any);
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mon = MONTHS[d.getMonth()];
+      const yy = String(d.getFullYear()).slice(-2);
+      return `${dd}${mon}${yy}`;
+    } catch {
+      return String(expiryInput).replace(/-/g,'').toUpperCase();
     }
-    setOpen(true);
+  };
+  const buildOptionSymbol = (und: string, expiry: string | Date, strike: number, type: 'CE'|'PE'): string => {
+    const undU = String(und).toUpperCase();
+    const expCode = toExpiryCode(expiry);
+    const typ = String(type).toUpperCase();
+    return `${undU}${expCode}${Math.round(Number(strike))}${typ}`;
+  };
+
+  const handleReverseExit = async () => {
+    if (!selectedId) return;
+    const pos = positions.find(p => p.id === selectedId);
+    if (!pos) return;
+    const lotSize = LOTSIZES.get(pos.underlying as any) || 75;
+    if (!Array.isArray(pos.legs) || pos.legs.length === 0) {
+      setToastPack(p=>[...p,{ key: Date.now(), type: 'error', message: 'No legs to reverse' }]); setOpen(true); return;
+    }
+    setIsExiting(true);
+    try {
+      // Build reverse orders
+      const orders = pos.legs.map(l => ({
+        symbol: buildOptionSymbol(pos.underlying, pos.expiry, l.strike, l.type),
+        exchange: 'NFO',
+        action: (l.action === 'B' ? 'SELL' : 'BUY'),
+        quantity: Math.max(1, Number(l.lots||1)) * lotSize,
+        pricetype: 'MARKET',
+        product: 'NRML',
+      }));
+      const resp = await fetch(`${apiBase}/openalgo/basket-order`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ strategy: pos.name, orders }) });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || data?.ok === false) {
+        setToastPack(p=>[...p,{ key: Date.now(), type: 'error', message: `Reverse order failed${data?.error?`: ${String(data.error)}`:''}` }]);
+      } else {
+        const idsArr = Array.isArray(data?.orderIds) ? data.orderIds : [];
+        const idsStr = idsArr.length ? idsArr.slice(0,3).join(', ') + (idsArr.length>3 ? ', …' : '') : '';
+        const logUrl = `${apiBase}/logs/today`;
+        setToastPack(p=>[...p,{ key: Date.now(), type: 'success', message: `Reverse orders sent${idsStr ? ` (IDs: ${idsStr})` : ''}`, actionLabel:'View Log', actionHref: logUrl }]);
+        // Mark position closed locally
+        const updated = await patchPosition(selectedId, { status: 'closed' });
+        if (updated) setPositions(prev => prev.map(p => p.id === selectedId ? (updated as Position) : p));
+      }
+    } catch (e:any) {
+      setToastPack(p=>[...p,{ key: Date.now(), type: 'error', message: `Failed to send reverse orders: ${e?.message||'network error'}` }]);
+    } finally {
+      setIsExiting(false);
+      setOpen(true);
+    }
   };
 
   const handleRecalculate = () => {
@@ -315,7 +382,7 @@ const Positions = () => {
             </FormControl>
           </Grid>
           <Grid item xs='auto'>
-            <Button variant='contained' color='error' size='small' disabled={!selectedId} onClick={handleExit}>Exit</Button>
+            <Button variant='contained' color='error' size='small' disabled={!selectedId || isExiting} onClick={handleReverseExit}>Reverse & Exit</Button>
           </Grid>
           <Grid item xs='auto'>
             <Button variant='outlined' size='small' disabled={!selectedId} onClick={()=>setAdjustOpen(true)}>Adjust</Button>

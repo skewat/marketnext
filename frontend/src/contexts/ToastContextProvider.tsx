@@ -4,6 +4,8 @@ export type ToastMessage = {
   message: string;
   type: "success" | "error" | "warning" | "info";
   key: number;
+  actionLabel?: string;
+  actionHref?: string;
 };
 
 type ToastContextProviderProps = {

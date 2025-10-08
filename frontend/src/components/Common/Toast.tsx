@@ -1,6 +1,7 @@
 import { useEffect, useContext } from 'react';
 import { ToastContext } from '../../contexts/ToastContextProvider';
 import Snackbar, { type SnackbarCloseReason } from '@mui/material/Snackbar';
+import Button from '@mui/material/Button';
 
 const Toast = () => {
   const { open, toastPack, messageInfo, setOpen, setToastPack, setMessageInfo } = useContext(ToastContext);
@@ -37,6 +38,13 @@ const Toast = () => {
       onClose={handleClose}
       TransitionProps={{ onExited: handleExited }}
       message={messageInfo ? messageInfo.message : undefined}
+      action={messageInfo?.actionHref && messageInfo?.actionLabel ? (
+        <Button color="secondary" size="small" onClick={() => {
+          try { window.open(messageInfo.actionHref!, '_blank'); } catch {}
+        }}>
+          {messageInfo.actionLabel}
+        </Button>
+      ) : undefined}
     />
   );
 };

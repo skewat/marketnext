@@ -73,6 +73,10 @@ const Scheduler = () => {
   });
   const [isDeploying, setIsDeploying] = useState(false);
   const [selectedStrategyName, setSelectedStrategyName] = useState<string>(cfg.selectedStrategyName || '');
+  // Trade params (selectable; default NFO/NRML/MARKET)
+  const [tradeExchange, setTradeExchange] = useState<'NFO'|'NSE'>('NFO');
+  const [tradeProduct, setTradeProduct] = useState<'NRML'|'MIS'>('NRML');
+  const [tradePriceType, setTradePriceType] = useState<'MARKET'|'LIMIT'>('MARKET');
 
   // Saved strategies loader from backend (scoped by underlying)
   type SavedStrategy = { name:string; underlying:string; expiry:string|null; version?:2; optionLegs:any[]; updatedAt:number; type?: 'user'|'default'; creator?: string };
@@ -242,11 +246,11 @@ const Scheduler = () => {
         const lotSize = LOTSIZES.get(underlying as any) || 75;
         const orders = legs.map(l => ({
           symbol: buildOptionSymbol(underlying, expiry, l.strike, l.type),
-          exchange: 'NFO',
+          exchange: tradeExchange,
           action: (l.action === 'B' ? 'BUY' : 'SELL'),
           quantity: Math.max(1, Number(l.lots||1)) * lotSize,
-          pricetype: 'MARKET',
-          product: 'NRML',
+          pricetype: tradePriceType,
+          product: tradeProduct,
         }));
         const resp = await fetch(`${apiBase}/openalgo/basket-order`, {
           method: 'POST',
@@ -260,7 +264,16 @@ const Scheduler = () => {
         if (!resp.ok || data?.ok === false) {
           setToastPack(p=>[...p,{key:Date.now(),type:'error',message:`OpenAlgo order failed${data?.error?`: ${String(data.error)}`:''}`}]);
         } else {
-          setToastPack(p=>[...p,{key:Date.now(),type:'success',message:'Orders sent to OpenAlgo'}]);
+          const idsArr = Array.isArray(data?.orderIds) ? data.orderIds : [];
+          const idsStr = idsArr.length ? idsArr.slice(0,3).join(', ') + (idsArr.length>3 ? ', …' : '') : '';
+          const logUrl = `${apiBase}/logs/today`;
+          setToastPack(p=>[...p,{
+            key:Date.now(),
+            type:'success',
+            message:`Orders sent to OpenAlgo${idsStr ? ` (IDs: ${idsStr})` : ''}`,
+            actionLabel:'View Log',
+            actionHref: logUrl,
+          }]);
           // Optional: surface some debug in console for tracing
           try { console.debug('OpenAlgo basket response:', data); } catch {}
         }
@@ -620,6 +633,34 @@ const Scheduler = () => {
                 <ToggleButton value='now'>Deploy now</ToggleButton>
                 <ToggleButton value='schedule'>Schedule deploy at</ToggleButton>
               </ToggleButtonGroup>
+            </Grid>
+            {/* Trade parameter selectors */}
+            <Grid item>
+              <FormControl size='small'>
+                <InputLabel id='exch-label'>Exchange</InputLabel>
+                <Select labelId='exch-label' label='Exchange' value={tradeExchange} onChange={e=>setTradeExchange(e.target.value as any)} sx={{ minWidth: 96 }}>
+                  <MenuItem value='NFO'>NFO</MenuItem>
+                  <MenuItem value='NSE'>NSE</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item>
+              <FormControl size='small'>
+                <InputLabel id='prod-label'>Product</InputLabel>
+                <Select labelId='prod-label' label='Product' value={tradeProduct} onChange={e=>setTradeProduct(e.target.value as any)} sx={{ minWidth: 96 }}>
+                  <MenuItem value='NRML'>NRML</MenuItem>
+                  <MenuItem value='MIS'>MIS</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item>
+              <FormControl size='small'>
+                <InputLabel id='ptype-label'>Price type</InputLabel>
+                <Select labelId='ptype-label' label='Price type' value={tradePriceType} onChange={e=>setTradePriceType(e.target.value as any)} sx={{ minWidth: 112 }}>
+                  <MenuItem value='MARKET'>MARKET</MenuItem>
+                  <MenuItem value='LIMIT'>LIMIT</MenuItem>
+                </Select>
+              </FormControl>
             </Grid>
             <Grid item xs={12} md={3}>
               <FormControl fullWidth size='small'>

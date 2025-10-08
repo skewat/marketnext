@@ -51,6 +51,27 @@ const readJson = (file, fallback) => {
   try { if (!fs.existsSync(file)) return fallback; const t = fs.readFileSync(file, 'utf8'); return JSON.parse(t); } catch { return fallback; }
 };
 const writeJson = (file, data) => { try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); } catch {} };
+// Helper: extract potential order IDs from arbitrary API responses
+const collectOrderIds = (payload) => {
+  const out = new Set();
+  const keys = new Set(['order_id','orderId','orderid','nOrdNo','oms_order_id','omsOrderId','id']);
+  const visit = (v) => {
+    try {
+      if (v == null) return;
+      if (Array.isArray(v)) { v.forEach(visit); return; }
+      if (typeof v === 'object') {
+        for (const [k,val] of Object.entries(v)) {
+          const key = String(k);
+          if (keys.has(key) && (typeof val === 'string' || typeof val === 'number')) out.add(String(val));
+          visit(val);
+        }
+        return;
+      }
+    } catch {}
+  };
+  visit(payload);
+  return Array.from(out);
+};
 
 // --- API logging middleware ---
 const LOG_MAX_BODY = 5000; // truncate large bodies to keep logs light
@@ -541,6 +562,21 @@ app.patch('/openalgo-config', (req, res) => {
   }
 });
 
+// Serve today's aggregated API log file for quick access from UI
+app.get('/logs/today', (req, res) => {
+  try {
+    const day = new Date();
+    const yyyy = String(day.getFullYear());
+    const mm = String(day.getMonth()+1).padStart(2,'0');
+    const dd = String(day.getDate()).padStart(2,'0');
+    const file = path.join(logsRoot, `api-${yyyy}-${mm}-${dd}.jsonl`);
+    if (!fs.existsSync(file)) return res.status(404).send('No log for today');
+    return res.sendFile(file);
+  } catch (e) {
+    return res.status(500).send('Failed to read log');
+  }
+});
+
 // POST /openalgo/funds { host?: string, port?: number, apiKey?: string }
 app.post('/openalgo/funds', async (req, res) => {
   const { host, port, apiKey } = req.body || {};
@@ -686,7 +722,8 @@ app.post('/openalgo/basket-order', async (req, res) => {
     const respHeaderLines = Object.entries(axiosRes.headers || {}).map(([k,v])=>`${k}: ${String(v)}`);
     const clippedBody = rawBody.length > MAX_RAW ? rawBody.slice(0, MAX_RAW) + `\n…(${rawBody.length - MAX_RAW} more bytes)` : rawBody;
     const responseRaw = [statusLine, ...respHeaderLines, '', clippedBody].join('\n');
-    return res.status(200).json({ ok: true, data: axiosRes.data, debug: { durationMs: ms, requestRaw, responseRaw, response: { status: axiosRes.status, headers: axiosRes.headers } } });
+    const orderIds = collectOrderIds(axiosRes.data);
+    return res.status(200).json({ ok: true, data: axiosRes.data, orderIds, debug: { durationMs: ms, requestRaw, responseRaw, response: { status: axiosRes.status, headers: axiosRes.headers } } });
   } catch (e) {
     const u = new URL(url);
     const pathWithQuery = u.pathname + u.search;
