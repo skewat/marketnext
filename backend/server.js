@@ -532,6 +532,19 @@ app.post('/openalgo/funds', async (req, res) => {
   const url = String(base).replace(/\/$/, '') + '/api/v1/funds';
   if (!key) return res.status(400).json({ error: 'apiKey required' });
   const started = Date.now();
+  // Explicit log for outgoing OpenAlgo call
+  try {
+    logLine({
+      ts: new Date().toISOString(),
+      event: 'openalgo.request',
+      endpoint: 'funds',
+      method: 'POST',
+      target: url,
+      base,
+      host: (new URL(url)).host,
+      maskedApiKey: key.length <= 5 ? '*'.repeat(key.length) : key.slice(0,3) + '***' + key.slice(-2)
+    });
+  } catch {}
   try {
     const axiosRes = await axios.post(url, { apikey: key }, { validateStatus: () => true });
     const ms = Date.now() - started;
@@ -608,6 +621,20 @@ app.post('/openalgo/basket-order', async (req, res) => {
   const url = `${base}/api/v1/basketorder`;
   const payload = { apikey: key, strategy, orders };
   const started = Date.now();
+  // Explicit log for outgoing OpenAlgo call
+  try {
+    logLine({
+      ts: new Date().toISOString(),
+      event: 'openalgo.request',
+      endpoint: 'basketorder',
+      method: 'POST',
+      target: url,
+      base,
+      host: (new URL(url)).host,
+      strategy,
+      ordersCount: Array.isArray(orders) ? orders.length : 0
+    });
+  } catch {}
   try {
     const axiosRes = await axios.post(url, payload, { validateStatus: () => true });
     const ms = Date.now() - started;
