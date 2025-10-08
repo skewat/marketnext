@@ -7,6 +7,7 @@ import { getUnderlying, setSBOptionLegs, setSBExpiry, setSBFuturesPerExpiry, set
 import { useOpenInterestQuery } from '../../app/services/openInterest';
 import { ToastContext } from '../../contexts/ToastContextProvider';
 import PNLVisualizer from '../StrategyBuilder/PNLVisualizer';
+import { LOTSIZES } from '../../identifiers';
 import { getTargetDateTime } from '../../utils';
 import type { OptionLeg as OptionLegType } from '../../features/selected/types';
 
@@ -198,7 +199,41 @@ const Scheduler = () => {
     // Save as an open position to backend
     try {
       const legs = editableLegs.length ? buildLegsFromEditable() : buildLegsForSelected();
+      // Save position locally
       await postPosition({ name: selectedStrategyName, underlying, expiry, legs, status: 'open', createdAt: Date.now(), exit: { mode: (cfg.exitMode||'onExpiry') as any, stopLossPct: cfg.stopLossPct, stopLossAbs: cfg.stopLossAbs, profitTargetPct: cfg.profitTargetPct, trailingEnabled: cfg.trailingEnabled } });
+      // Also send basket order to OpenAlgo host using backend bridge (reads Data/openalgo.json)
+      try {
+        const lotSize = LOTSIZES.get(underlying as any) || 75;
+        const basketLegs = legs.map(l => ({
+          action: l.action,
+          type: l.type,
+          strike: l.strike,
+          expiry,
+          quantity: Math.max(1, Number(l.lots||1)) * lotSize,
+        }));
+        const resp = await fetch(`${apiBase}/openalgo/basket-order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            strategy: selectedStrategyName,
+            exchange: 'NSE',
+            product: 'MIS',
+            pricetype: 'MARKET',
+            underlying,
+            legs: basketLegs,
+          })
+        });
+        const data = await resp.json().catch(()=>({}));
+        if (!resp.ok || data?.ok === false) {
+          setToastPack(p=>[...p,{key:Date.now(),type:'error',message:`OpenAlgo order failed${data?.error?`: ${String(data.error)}`:''}`}]);
+        } else {
+          setToastPack(p=>[...p,{key:Date.now(),type:'success',message:'Orders sent to OpenAlgo'}]);
+          // Optional: surface some debug in console for tracing
+          try { console.debug('OpenAlgo basket response:', data); } catch {}
+        }
+      } catch (e:any) {
+        setToastPack(p=>[...p,{key:Date.now(),type:'error',message:`Failed to contact OpenAlgo: ${e?.message||'network error'}` }]);
+      }
     } catch (e) {
       setToastPack(p=>[...p,{key:Date.now(),type:'error',message:'Failed to deploy position'}]);
     } finally {
