@@ -102,6 +102,42 @@ const Scheduler = () => {
     return res.json();
   };
 
+  // Helpers to build broker symbol (e.g., NIFTY28OCT2524800CE)
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] as const;
+  const toExpiryCode = (expiryInput: string | Date): string => {
+    try {
+      let d: Date | null = null;
+      if (expiryInput instanceof Date) d = expiryInput;
+      else if (typeof expiryInput === 'string') {
+        const m1 = expiryInput.match(/^(\d{1,2})[- ]?([A-Za-z]{3})[- ]?(\d{2,4})$/);
+        if (m1) {
+          const dd = parseInt(m1[1],10);
+          const mon = m1[2].toUpperCase();
+          const yy = m1[3].length === 4 ? parseInt(m1[3].slice(-2),10) : parseInt(m1[3],10);
+          const mi = MONTHS.indexOf(mon as any);
+          if (mi >= 0) d = new Date(2000+yy, mi, dd);
+        }
+        if (!d) {
+          const t = Date.parse(expiryInput);
+          if (!Number.isNaN(t)) d = new Date(t);
+        }
+      }
+      if (!d) d = new Date(expiryInput as any);
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mon = MONTHS[d.getMonth()];
+      const yy = String(d.getFullYear()).slice(-2);
+      return `${dd}${mon}${yy}`;
+    } catch {
+      return String(expiryInput).replace(/-/g,'').toUpperCase();
+    }
+  };
+  const buildOptionSymbol = (und: string, expiry: string | Date, strike: number, type: 'CE'|'PE'): string => {
+    const undU = String(und).toUpperCase();
+    const expCode = toExpiryCode(expiry);
+    const typ = String(type).toUpperCase();
+    return `${undU}${expCode}${Math.round(Number(strike))}${typ}`;
+  };
+
   // Build absolute legs for current selection using OI snapshot
   const buildLegsForSelected = (): OptionLegType[] => {
     const d: any = data;
@@ -204,23 +240,20 @@ const Scheduler = () => {
       // Also send basket order to OpenAlgo host using backend bridge (reads Data/openalgo.json)
       try {
         const lotSize = LOTSIZES.get(underlying as any) || 75;
-        const basketLegs = legs.map(l => ({
+        const orders = legs.map(l => ({
+          symbol: buildOptionSymbol(underlying, expiry, l.strike, l.type),
+          exchange: 'NFO',
           action: (l.action === 'B' ? 'BUY' : 'SELL'),
-          type: l.type,
-          strike: l.strike,
-          expiry,
           quantity: Math.max(1, Number(l.lots||1)) * lotSize,
+          pricetype: 'MARKET',
+          product: 'NRML',
         }));
         const resp = await fetch(`${apiBase}/openalgo/basket-order`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             strategy: selectedStrategyName,
-            exchange: 'NFO',
-            product: 'NRML',
-            pricetype: 'MARKET',
-            underlying,
-            legs: basketLegs,
+            orders,
           })
         });
         const data = await resp.json().catch(()=>({}));

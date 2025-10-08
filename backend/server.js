@@ -629,7 +629,9 @@ app.post('/openalgo/basket-order', async (req, res) => {
   const base = /^https?:\/\//i.test(host) ? host.replace(/\/$/,'') : `http://${host}:${port}`;
 
   const strategy = typeof body.strategy === 'string' ? body.strategy : 'NodeJS';
+  // Prefer explicit orders if provided
   let orders = Array.isArray(body.orders) ? body.orders : null;
+  // Fallback: build orders from legs + underlying
   if (!orders && Array.isArray(body.legs) && body.underlying) {
   const exchange = body.exchange || 'NFO';
   const product = body.product || 'NRML';
