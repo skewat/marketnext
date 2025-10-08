@@ -169,6 +169,36 @@ const formatOptionSymbol = (underlying, expiryInput, strike, type) => {
   }
 };
 
+// Format only the expiry part as DDMONYY (e.g., 14OCT25)
+const formatExpiryCode = (expiryInput) => {
+  try {
+    let d = null;
+    if (expiryInput instanceof Date) d = expiryInput;
+    else if (typeof expiryInput === 'string') {
+      const m1 = expiryInput.match(/^(\d{1,2})[- ]?([A-Za-z]{3})[- ]?(\d{2,4})$/);
+      if (m1) {
+        const dd = parseInt(m1[1],10);
+        const mon = m1[2].toUpperCase();
+        const yy = m1[3].length === 4 ? parseInt(m1[3].slice(-2),10) : parseInt(m1[3],10);
+        const mi = monthMap.indexOf(mon);
+        if (mi >= 0) d = new Date(2000+yy, mi, dd);
+      }
+      if (!d) {
+        const t = Date.parse(expiryInput);
+        if (!Number.isNaN(t)) d = new Date(t);
+      }
+    }
+    if (!d) d = new Date(expiryInput);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mon = monthMap[d.getMonth()];
+    const yy = String(d.getFullYear()).slice(-2);
+    return `${dd}${mon}${yy}`;
+  } catch {
+    // Fallback to best-effort string (strip dashes)
+    return String(expiryInput).replace(/-/g,'').toUpperCase();
+  }
+};
+
 // Normalize exit object to enforce backend semantics
 const normalizeExit = (exit) => {
   const toPosStr = (v) => {
@@ -601,18 +631,23 @@ app.post('/openalgo/basket-order', async (req, res) => {
   const strategy = typeof body.strategy === 'string' ? body.strategy : 'NodeJS';
   let orders = Array.isArray(body.orders) ? body.orders : null;
   if (!orders && Array.isArray(body.legs) && body.underlying) {
-    const exchange = body.exchange || 'NSE';
-    const product = body.product || 'MIS';
+  const exchange = body.exchange || 'NFO';
+  const product = body.product || 'NRML';
     const pricetype = body.pricetype || 'MARKET';
     const underlying = body.underlying;
-    orders = body.legs.map(l => ({
-      symbol: formatOptionSymbol(underlying, l.expiry, l.strike, l.type),
-      exchange,
-      action: (l.action || '').toUpperCase(),
-      quantity: Number(l.quantity) || 1,
-      pricetype,
-      product,
-    }));
+    orders = body.legs.map(l => {
+      const actRaw = ((l.action || '') + '').toUpperCase();
+      const action = (actRaw === 'B' || actRaw === 'BUY') ? 'BUY' : (actRaw === 'S' || actRaw === 'SELL') ? 'SELL' : actRaw || 'BUY';
+      return {
+        symbol: formatOptionSymbol(underlying, l.expiry, l.strike, l.type),
+        exchange,
+        action,
+        expiry: formatExpiryCode(l.expiry),
+        quantity: Number(l.quantity) || 1,
+        pricetype,
+        product,
+      };
+    });
   }
   if (!orders || !Array.isArray(orders) || orders.length === 0) {
     return res.status(400).json({ error: 'orders or legs required' });

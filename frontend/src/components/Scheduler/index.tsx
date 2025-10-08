@@ -205,7 +205,7 @@ const Scheduler = () => {
       try {
         const lotSize = LOTSIZES.get(underlying as any) || 75;
         const basketLegs = legs.map(l => ({
-          action: l.action,
+          action: (l.action === 'B' ? 'BUY' : 'SELL'),
           type: l.type,
           strike: l.strike,
           expiry,
@@ -216,8 +216,8 @@ const Scheduler = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             strategy: selectedStrategyName,
-            exchange: 'NSE',
-            product: 'MIS',
+            exchange: 'NFO',
+            product: 'NRML',
             pricetype: 'MARKET',
             underlying,
             legs: basketLegs,
