@@ -483,7 +483,15 @@ const Positions = () => {
             </FormControl>
           </Grid>
           <Grid item xs='auto'>
-            <Button variant='contained' color='error' size='small' disabled={!selectedId || isExiting} onClick={handleReverseExit}>Exit</Button>
+            <Button
+              variant='contained'
+              color='error'
+              size='small'
+              disabled={!selectedId || isExiting || (positions.find(p=>p.id===selectedId)?.status !== 'open')}
+              onClick={handleReverseExit}
+            >
+              Exit
+            </Button>
           </Grid>
           <Grid item xs='auto'>
             <Button variant='outlined' size='small' disabled={!selectedId} onClick={()=>setAdjustOpen(true)}>Notes</Button>
