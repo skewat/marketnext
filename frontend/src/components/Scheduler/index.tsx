@@ -97,7 +97,15 @@ const Scheduler = () => {
 
   // Handlers
   const handleChange = (k: keyof SchedulerConfig, v:any)=> setCfg(p=>({ ...p, [k]: v }));
-  const resetConfig = ()=> { setCfg(DEFAULT_CONFIG); setSelectedStrategyName(''); };
+  const resetConfig = ()=> {
+    setCfg(DEFAULT_CONFIG);
+    setSelectedStrategyName('');
+    setEditableLegs([]);
+    // Reset trade param selectors to defaults
+    setTradeExchange('NFO');
+    setTradeProduct('NRML');
+    setTradePriceType('MARKET');
+  };
 
   const postPosition = async (payload: any) => {
     const url = `${apiBase}/positions`;
@@ -226,6 +234,8 @@ const Scheduler = () => {
       try {
         const legs = buildLegsForSelected();
         await postPosition({ name: selectedStrategyName, underlying, expiry, legs, status: 'scheduled', createdAt: Date.now(), schedule: { day: cfg.deployDay!, time: cfg.deployTime! }, exit: { mode: (cfg.exitMode||'onExpiry') as any, stopLossPct: cfg.stopLossPct, stopLossAbs: cfg.stopLossAbs, profitTargetPct: cfg.profitTargetPct, trailingEnabled: cfg.trailingEnabled } });
+        // Clear page after successful scheduling
+        resetConfig();
       } catch (e) {
         setToastPack(p=>[...p,{key:Date.now(),type:'error',message:'Failed to schedule position'}]);
       } finally {
@@ -274,6 +284,8 @@ const Scheduler = () => {
             actionLabel:'View Log',
             actionHref: logUrl,
           }]);
+          // Clear page after successful deploy to avoid duplicate deploy
+          resetConfig();
           // Optional: surface some debug in console for tracing
           try { console.debug('OpenAlgo basket response:', data); } catch {}
         }
@@ -680,7 +692,7 @@ const Scheduler = () => {
             </Grid>
             <Grid item xs='auto'>
               <Button variant='contained' color='success' onClick={handleDeploy} disabled={isDeploying || !selectedStrategyName} size='small'>
-                {cfg.deployMode === 'now' ? 'Deploy now' : 'Schedule'}
+                {cfg.deployMode === 'now' ? 'Deploy' : 'Schedule'}
               </Button>
             </Grid>
             <Grid item xs='auto'>
