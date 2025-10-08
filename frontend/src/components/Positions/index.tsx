@@ -48,18 +48,20 @@ const fetchSavedStrategiesMap = async (underlying: string): Promise<Record<strin
   } catch { return {}; }
 };
 
-const fetchStrategyNote = async (underlying: string, name: string): Promise<string | null> => {
+const fetchPositionNote = async (id: string): Promise<string | null> => {
   try {
-    const res = await fetch(`${apiBase}/strategy-note?underlying=${encodeURIComponent(underlying)}&name=${encodeURIComponent(name)}`);
+    const res = await fetch(`${apiBase}/position-note/${encodeURIComponent(id)}`);
     if (!res.ok) return null;
     const json = await res.json();
     return json?.content ?? null;
   } catch { return null; }
 };
 
-const saveStrategyNote = async (underlying: string, name: string, content: string): Promise<boolean> => {
+const savePositionNote = async (id: string, content: string, seed?: { underlying: string; name: string }): Promise<boolean> => {
   try {
-    const res = await fetch(`${apiBase}/strategy-note`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ underlying, name, content }) });
+    const body: any = { content };
+    if (seed) { body.underlying = seed.underlying; body.name = seed.name; }
+    const res = await fetch(`${apiBase}/position-note/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return res.ok;
   } catch { return false; }
 };
@@ -235,7 +237,7 @@ const Positions = () => {
     });
   }, [selectedId, positions, data]);
 
-  // Load adjustment note when Adjust drawer opens
+  // Load per-position note when Notes drawer opens
   useEffect(() => {
     if (!adjustOpen) {
       setNoteContent(null);
@@ -247,7 +249,7 @@ const Positions = () => {
     if (!pos) { setNoteContent(null); return; }
     setNoteLoading(true);
     setNoteError(null);
-    fetchStrategyNote(pos.underlying, pos.name)
+    fetchPositionNote(pos.id)
       .then(content => { if (content) setNoteContent(content); else setNoteError('No adjustment note found for this strategy.'); })
       .catch(() => setNoteError('Failed to load adjustment note.'))
       .finally(() => setNoteLoading(false));
@@ -318,7 +320,7 @@ const Positions = () => {
         const idsArr = Array.isArray(data?.orderIds) ? data.orderIds : [];
         const idsStr = idsArr.length ? idsArr.slice(0,3).join(', ') + (idsArr.length>3 ? ', …' : '') : '';
         const logUrl = `${apiBase}/logs/today`;
-        setToastPack(p=>[...p,{ key: Date.now(), type: 'success', message: `Reverse orders sent${idsStr ? ` (IDs: ${idsStr})` : ''}`, actionLabel:'View Log', actionHref: logUrl }]);
+  setToastPack(p=>[...p,{ key: Date.now(), type: 'success', message: `Exit orders sent${idsStr ? ` (IDs: ${idsStr})` : ''}`, actionLabel:'View Log', actionHref: logUrl }]);
         // Mark position closed locally
         const updated = await patchPosition(selectedId, { status: 'closed' });
         if (updated) setPositions(prev => prev.map(p => p.id === selectedId ? (updated as Position) : p));
@@ -771,7 +773,9 @@ const Positions = () => {
                   <Button size='small' variant='contained' onClick={async()=>{
                     const pos = positions.find(p => p.id === selectedId);
                     if (!pos) return;
-                    const ok = await saveStrategyNote(pos.underlying, pos.name, noteDraft);
+                    // Seed from strategy note on first save if no pos note yet
+                    const seed = { underlying: pos.underlying, name: pos.name };
+                    const ok = await savePositionNote(pos.id, noteDraft, seed);
                     if (ok) { setNoteContent(noteDraft); setNoteEditMode(false); setToastPack(p=>[...p,{ key: Date.now(), type:'success', message:`Note saved (${Math.min(noteDraft.length, NOTE_MAX)}/${NOTE_MAX})` }]); } else { setToastPack(p=>[...p,{ key: Date.now(), type:'error', message:'Failed to save note' }]); }
                     setOpen(true);
                   }}>Save</Button>

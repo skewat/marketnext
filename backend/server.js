@@ -34,11 +34,13 @@ const dataRoot = path.resolve(repoRoot, 'Data');
 const logsRoot = path.resolve(repoRoot, 'logs');
 const oiCacheDir = path.resolve(dataRoot, 'oi-cache');
 const strategyNotesDir = path.resolve(dataRoot, 'strategy-notes');
+const positionNotesDir = path.resolve(dataRoot, 'position-notes');
 const NOTE_MAX_LENGTH = 1000;
 const ensureDir = (dir)=>{ if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); };
 ensureDir(dataRoot);
 ensureDir(oiCacheDir);
 ensureDir(strategyNotesDir);
+ensureDir(positionNotesDir);
 ensureDir(logsRoot);
 
 // JSON file storage for strategies and positions
@@ -47,6 +49,7 @@ const positionsFile = path.join(dataRoot, 'positions.json');
 const openAlgoConfigFile = path.join(dataRoot, 'openalgo.json');
 const safeName = (name) => String(name).replace(/[^a-zA-Z0-9_\-\. ]+/g, '_').trim();
 const notePath = (underlying, name) => path.join(strategyNotesDir, String(underlying).toUpperCase(), `${safeName(name)}.txt`);
+const posNotePath = (positionId) => path.join(positionNotesDir, `${safeName(positionId)}.txt`);
 const readJson = (file, fallback) => {
   try { if (!fs.existsSync(file)) return fallback; const t = fs.readFileSync(file, 'utf8'); return JSON.parse(t); } catch { return fallback; }
 };
@@ -524,6 +527,52 @@ app.patch('/strategy-note', (req, res) => {
     const trimmed = str.length > NOTE_MAX_LENGTH ? str.slice(0, NOTE_MAX_LENGTH) : str;
     fs.writeFileSync(p, trimmed, 'utf8');
     return res.status(200).json({ ok: true, truncated: trimmed.length < str.length, length: trimmed.length });
+  } catch (e) {
+    return res.status(500).json({ error: 'failed to write note' });
+  }
+});
+
+// Position note API: notes tied to a specific position id
+// GET /position-note/:id
+app.get('/position-note/:id', (req, res) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  try {
+    const p = posNotePath(id);
+    if (!fs.existsSync(p)) return res.status(404).json({ error: 'note not found' });
+    const raw = fs.readFileSync(p, 'utf8');
+    const content = raw.slice(0, NOTE_MAX_LENGTH);
+    const truncated = raw.length > NOTE_MAX_LENGTH;
+    return res.status(200).json({ content, truncated, length: content.length }).end();
+  } catch (e) {
+    return res.status(500).json({ error: 'failed to read note' });
+  }
+});
+
+// PATCH /position-note/:id  { content, underlying?, name? }
+// If no position note exists, optionally seed from strategy note (if underlying+name provided)
+app.patch('/position-note/:id', (req, res) => {
+  const { id } = req.params;
+  const { content, underlying, name } = req.body || {};
+  if (!id || typeof content !== 'string') return res.status(400).json({ error: 'id and content required' });
+  try {
+    const p = posNotePath(id);
+    ensureDir(path.dirname(p));
+    if (!fs.existsSync(p) && underlying && name) {
+      // Seed from strategy note if available
+      const sp = notePath(underlying, name);
+      try {
+        if (fs.existsSync(sp)) {
+          const src = fs.readFileSync(sp, 'utf8');
+          const seed = src.slice(0, NOTE_MAX_LENGTH);
+          fs.writeFileSync(p, seed, 'utf8');
+        }
+      } catch {}
+    }
+    const str = String(content);
+    const trimmed = str.length > NOTE_MAX_LENGTH ? str.slice(0, NOTE_MAX_LENGTH) : str;
+    fs.writeFileSync(p, trimmed, 'utf8');
+    return res.status(200).json({ ok: true, length: trimmed.length });
   } catch (e) {
     return res.status(500).json({ error: 'failed to write note' });
   }
