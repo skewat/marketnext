@@ -371,35 +371,7 @@ const Positions = () => {
   };
 
   // Helpers for building symbols/strikes
-  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] as const;
-  const toExpiryCode = (expiryInput: string | Date): string => {
-    try {
-      let d: Date | null = null;
-      if (expiryInput instanceof Date) d = expiryInput;
-      else if (typeof expiryInput === 'string') {
-        const m1 = expiryInput.match(/^(\d{1,2})[- ]?([A-Za-z]{3})[- ]?(\d{2,4})$/);
-        if (m1) {
-          const dd = parseInt(m1[1],10);
-          const mon = m1[2].toUpperCase();
-          const yy = m1[3].length === 4 ? parseInt(m1[3].slice(-2),10) : parseInt(m1[3],10);
-          const mi = MONTHS.indexOf(mon as any);
-          if (mi >= 0) d = new Date(2000+yy, mi, dd);
-        }
-        if (!d) {
-          const t = Date.parse(expiryInput);
-          if (!Number.isNaN(t)) d = new Date(t);
-        }
-      }
-      if (!d) d = new Date(expiryInput as any);
-      const dd = String(d.getDate()).padStart(2,'0');
-      const mon = MONTHS[d.getMonth()];
-      const yy = String(d.getFullYear()).slice(-2);
-      return `${dd}${mon}${yy}`;
-    } catch {
-      return String(expiryInput).replace(/-/g,'').toUpperCase();
-    }
-  };
-  const buildOptionSymbol = (und: string, expiry: string | Date, strike: number, type: 'CE'|'PE'): string => `${String(und).toUpperCase()}${toExpiryCode(expiry)}${Math.round(Number(strike))}${type}`;
+  // Use earlier declared toExpiryCode/buildOptionSymbol; only need strike snapper here
   const snapStrikeFor = (expiry: string, desiredSpot: number): { strike: number; price: number|null; iv: number|null } => {
     const d: any = data; const g = d?.grouped?.[expiry];
     const rows = (g?.data || []) as any[];
@@ -419,7 +391,7 @@ const Positions = () => {
     if (!pos) return;
     const lotSize = LOTSIZES.get(pos.underlying as any) || 75;
     const exits = legDisplay.filter(ld => exitLegMap[ld.key]);
-    const maxNew = (pos.legs || []).length;
+    const maxNew = exits.length;
     if (newLegDrafts.length > maxNew) {
       setToastPack(p=>[...p,{ key: Date.now(), type:'error', message:`Too many new legs (max ${maxNew})` }]); setOpen(true); return;
     }
@@ -748,7 +720,7 @@ const Positions = () => {
                 </Grid>
               ))}
               <Box sx={{ display:'flex', gap:1 }}>
-                <Button size='small' variant='outlined' disabled={(positions.find(p=>p.id===selectedId)?.legs.length||0) <= newLegDrafts.length} onClick={()=> setNewLegDrafts(a=> [...a, { expiry: (positions.find(p=>p.id===selectedId)?.expiry)||'', spot:'', lots:'1', type:'CE', action:'B' }])}>Add leg</Button>
+                <Button size='small' variant='outlined' disabled={newLegDrafts.length >= Object.values(exitLegMap).filter(Boolean).length} onClick={()=> setNewLegDrafts(a=> [...a, { expiry: (positions.find(p=>p.id===selectedId)?.expiry)||'', spot:'', lots:'1', type:'CE', action:'B' }])}>Add leg</Button>
                 <Button size='small' variant='outlined' disabled={newLegDrafts.length===0} onClick={()=> setNewLegDrafts(a=> a.slice(0, -1))}>Remove last</Button>
               </Box>
               <Box sx={{ display:'flex', gap:1, mt:1 }}>
