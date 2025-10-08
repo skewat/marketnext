@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useContext } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Box, Paper, Typography, Grid, FormControl, InputLabel, Select, MenuItem, Button, Drawer, Table, TableHead, TableRow, TableCell, TableBody } from '@mui/material';
+import { Box, Paper, Typography, Grid, FormControl, InputLabel, Select, MenuItem, Button, Drawer, Table, TableHead, TableRow, TableCell, TableBody, Checkbox, TextField } from '@mui/material';
 import { getUnderlying, setUnderlying as setGlobalUnderlying, setSBATMIVsPerExpiry, setSBFuturesPerExpiry, setSBUnderlyingPrice, setSBTargetUnderlyingPrice, setSBTargetDateTime, setSBOptionLegs, setSBExpiry } from '../../features/selected/selectedSlice';
 import { useOpenInterestQuery } from '../../app/services/openInterest';
 import PNLVisualizer from '../StrategyBuilder/PNLVisualizer';
@@ -73,6 +73,7 @@ const Positions = () => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustTradeOpen, setAdjustTradeOpen] = useState(false);
   const [noteLoading, setNoteLoading] = useState(false);
   const [noteContent, setNoteContent] = useState<string | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -80,6 +81,10 @@ const Positions = () => {
   const [noteDraft, setNoteDraft] = useState('');
   const NOTE_MAX = 1000;
   const [isExiting, setIsExiting] = useState(false);
+  // Adjust state
+  const [exitLegMap, setExitLegMap] = useState<Record<string, boolean>>({});
+  type NewLegDraft = { expiry: string; spot: string; lots: string; type: 'CE'|'PE'; action: 'B'|'S' };
+  const [newLegDrafts, setNewLegDrafts] = useState<NewLegDraft[]>([]);
 
   // Helper to check if a timestamp is on the same local day as today
   const isSameLocalDay = (ms?: number) => {
@@ -365,6 +370,128 @@ const Positions = () => {
     setOpen(true);
   };
 
+  // Helpers for building symbols/strikes
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] as const;
+  const toExpiryCode = (expiryInput: string | Date): string => {
+    try {
+      let d: Date | null = null;
+      if (expiryInput instanceof Date) d = expiryInput;
+      else if (typeof expiryInput === 'string') {
+        const m1 = expiryInput.match(/^(\d{1,2})[- ]?([A-Za-z]{3})[- ]?(\d{2,4})$/);
+        if (m1) {
+          const dd = parseInt(m1[1],10);
+          const mon = m1[2].toUpperCase();
+          const yy = m1[3].length === 4 ? parseInt(m1[3].slice(-2),10) : parseInt(m1[3],10);
+          const mi = MONTHS.indexOf(mon as any);
+          if (mi >= 0) d = new Date(2000+yy, mi, dd);
+        }
+        if (!d) {
+          const t = Date.parse(expiryInput);
+          if (!Number.isNaN(t)) d = new Date(t);
+        }
+      }
+      if (!d) d = new Date(expiryInput as any);
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mon = MONTHS[d.getMonth()];
+      const yy = String(d.getFullYear()).slice(-2);
+      return `${dd}${mon}${yy}`;
+    } catch {
+      return String(expiryInput).replace(/-/g,'').toUpperCase();
+    }
+  };
+  const buildOptionSymbol = (und: string, expiry: string | Date, strike: number, type: 'CE'|'PE'): string => `${String(und).toUpperCase()}${toExpiryCode(expiry)}${Math.round(Number(strike))}${type}`;
+  const snapStrikeFor = (expiry: string, desiredSpot: number): { strike: number; price: number|null; iv: number|null } => {
+    const d: any = data; const g = d?.grouped?.[expiry];
+    const rows = (g?.data || []) as any[];
+    const strikes: number[] = rows.map((r:any)=> r.strikePrice || r.strike).filter((v:any)=> typeof v==='number');
+    if (!strikes.length) return { strike: Math.round(desiredSpot), price: null, iv: null };
+    let best = strikes[0]; let bestDiff = Math.abs(best - desiredSpot);
+    for (const s of strikes) { const dif = Math.abs(s - desiredSpot); if (dif < bestDiff) { bestDiff = dif; best = s; } }
+    const row = rows.find((r:any)=> (r.strikePrice ?? r.strike) === best);
+    const price = row ? (typeof row.CE?.lastPrice === 'number' ? row.CE.lastPrice : (typeof row.PE?.lastPrice === 'number' ? row.PE.lastPrice : null)) : null;
+    const iv = row?.iv ?? null;
+    return { strike: best, price, iv };
+  };
+
+  const executeAdjustment = async () => {
+    if (!selectedId) return;
+    const pos = positions.find(p => p.id === selectedId);
+    if (!pos) return;
+    const lotSize = LOTSIZES.get(pos.underlying as any) || 75;
+    const exits = legDisplay.filter(ld => exitLegMap[ld.key]);
+    const maxNew = (pos.legs || []).length;
+    if (newLegDrafts.length > maxNew) {
+      setToastPack(p=>[...p,{ key: Date.now(), type:'error', message:`Too many new legs (max ${maxNew})` }]); setOpen(true); return;
+    }
+    // Build orders
+    const orders: Array<{symbol:string; exchange:string; action:'BUY'|'SELL'; quantity:number; pricetype:string; product:string}> = [];
+    // Exit legs -> reverse orders
+    for (const l of exits) {
+      orders.push({
+        symbol: buildOptionSymbol(pos.underlying, pos.expiry, l.strike, l.type),
+        exchange: 'NFO', action: (l.action==='B'?'SELL':'BUY'),
+        quantity: Math.max(1, Number(l.lots||1)) * lotSize,
+        pricetype: 'MARKET', product: 'NRML'
+      });
+    }
+    // New legs
+    for (const nd of newLegDrafts) {
+      const expiry = nd.expiry || pos.expiry;
+      const spotNum = parseFloat(nd.spot || '');
+      const lotsNum = Math.max(1, parseInt(nd.lots||'1',10) || 1);
+      if (!expiry || !Number.isFinite(spotNum)) {
+        setToastPack(p=>[...p,{ key: Date.now(), type:'error', message:'Fill expiry and spot for all new legs' }]); setOpen(true); return;
+      }
+      const snap = snapStrikeFor(expiry, spotNum);
+      orders.push({
+        symbol: buildOptionSymbol(pos.underlying, expiry, snap.strike, nd.type),
+        exchange: 'NFO', action: (nd.action==='B'?'BUY':'SELL'),
+        quantity: lotsNum * lotSize,
+        pricetype: 'MARKET', product: 'NRML'
+      });
+    }
+    if (orders.length === 0) { setToastPack(p=>[...p,{ key: Date.now(), type:'info', message:'No adjustments selected' }]); setOpen(true); return; }
+    try {
+      const resp = await fetch(`${apiBase}/openalgo/basket-order`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ strategy: `${pos.name} - adjustment`, orders }) });
+      const dataJson = await resp.json().catch(()=>({}));
+      if (!resp.ok || dataJson?.ok === false) {
+        setToastPack(p=>[...p,{ key: Date.now(), type:'error', message:`Adjustment order failed${dataJson?.error?`: ${String(dataJson.error)}`:''}` }]);
+      } else {
+        const idsArr = Array.isArray(dataJson?.orderIds) ? dataJson.orderIds : [];
+        const idsStr = idsArr.length ? idsArr.slice(0,3).join(', ') + (idsArr.length>3 ? ', …' : '') : '';
+        const logUrl = `${apiBase}/logs/today`;
+        setToastPack(p=>[...p,{ key: Date.now(), type:'success', message:`Adjustment sent${idsStr ? ` (IDs: ${idsStr})` : ''}`, actionLabel:'View Log', actionHref: logUrl }]);
+        // Update position legs: remove exited; add new legs
+        const keepKeys = new Set(legDisplay.filter(ld => !exitLegMap[ld.key]).map(ld => ld.key));
+        const remaining = (pos.legs || []).filter((leg, idx) => keepKeys.has(`${idx}-${leg.type}-${leg.strike}`));
+        const added = newLegDrafts.map(nd => {
+          const expiry = nd.expiry || pos.expiry;
+          const spotNum = parseFloat(nd.spot||'');
+          const lotsNum = Math.max(1, parseInt(nd.lots||'1',10) || 1);
+          const snap = snapStrikeFor(expiry, spotNum);
+          // Price for storage: use current LTP for that strike/type if available
+          const dAny: any = data; const g = dAny?.grouped?.[expiry];
+          const rows = (g?.data || []) as any[];
+          const row = rows.find((r:any)=> (r.strikePrice ?? r.strike) === snap.strike);
+          const price = nd.type==='CE' ? (row?.CE?.lastPrice ?? null) : (row?.PE?.lastPrice ?? null);
+          const iv = row?.iv ?? null;
+          return { active:true, action: nd.action, expiry, strike: snap.strike, type: nd.type, lots: lotsNum, price, iv } as OptionLegType;
+        });
+        const nextLegs = [ ...remaining, ...added ];
+        const updated = await patchPosition(selectedId, { legs: nextLegs });
+        if (updated) {
+          setPositions(prev => prev.map(p => p.id === selectedId ? (updated as Position) : p));
+        }
+        // Refresh SB/PNL state
+        handleRecalculate();
+        setAdjustTradeOpen(false);
+        setExitLegMap({}); setNewLegDrafts([]);
+      }
+    } catch (e:any) {
+      setToastPack(p=>[...p,{ key: Date.now(), type:'error', message:`Failed to send adjustment: ${e?.message||'network error'}` }]);
+    } finally { setOpen(true); }
+  };
+
   return (
     <Box sx={{ p:{ xs:2, md:3 }, display:'flex', flexDirection:'column', gap:2 }}>
       <Typography variant='h5' sx={{ mb:1 }}>Positions</Typography>
@@ -385,7 +512,10 @@ const Positions = () => {
             <Button variant='contained' color='error' size='small' disabled={!selectedId || isExiting} onClick={handleReverseExit}>Exit</Button>
           </Grid>
           <Grid item xs='auto'>
-            <Button variant='outlined' size='small' disabled={!selectedId} onClick={()=>setAdjustOpen(true)}>Adjust</Button>
+            <Button variant='outlined' size='small' disabled={!selectedId} onClick={()=>setAdjustOpen(true)}>Notes</Button>
+          </Grid>
+          <Grid item xs='auto'>
+            <Button variant='outlined' size='small' disabled={!selectedId} onClick={()=>{ setAdjustTradeOpen(true); setExitLegMap({}); setNewLegDrafts([]); }}>Adjust</Button>
           </Grid>
           <Grid item xs='auto'>
             <Button variant='outlined' size='small' disabled={!selectedId} onClick={handleRecalculate}>Recalculate</Button>
@@ -545,6 +675,88 @@ const Positions = () => {
             </Box>
           );
         })()}
+
+          {/* Adjustment Drawer */}
+          <Drawer anchor='right' open={adjustTradeOpen} onClose={()=>setAdjustTradeOpen(false)}>
+            <Box sx={{ width: 420, p:2, display:'flex', flexDirection:'column', gap:2 }}>
+              <Typography variant='h6'>Adjust Position</Typography>
+              <Typography variant='subtitle2'>Exit existing legs</Typography>
+              <Table size='small'>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Exit</TableCell>
+                    <TableCell>Action</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell align='right'>Strike</TableCell>
+                    <TableCell align='right'>Lots</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {legDisplay.map(ld => (
+                    <TableRow key={ld.key}>
+                      <TableCell>
+                        <Checkbox size='small' checked={!!exitLegMap[ld.key]} onChange={e=> setExitLegMap(m=>({ ...m, [ld.key]: e.target.checked }))} />
+                      </TableCell>
+                      <TableCell>{ld.action}</TableCell>
+                      <TableCell>{ld.type}</TableCell>
+                      <TableCell align='right'>{ld.strike}</TableCell>
+                      <TableCell align='right'>{ld.lots}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              <Typography variant='subtitle2' sx={{ mt:1 }}>Add new legs</Typography>
+              {newLegDrafts.map((n, idx) => (
+                <Grid key={idx} container spacing={1} alignItems='center'>
+                  <Grid item xs={12}>
+                    <Typography variant='caption'>New leg #{idx+1}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <FormControl fullWidth size='small'>
+                      <InputLabel id={`adj-exp-${idx}`}>Expiry</InputLabel>
+                      <Select labelId={`adj-exp-${idx}`} label='Expiry' value={n.expiry}
+                        onChange={e=> setNewLegDrafts(a=> a.map((x,i)=> i===idx ? { ...x, expiry: e.target.value } : x))}>
+                        {Object.keys(((data as any)?.grouped)||{}).map(ex=> <MenuItem key={ex} value={ex}>{ex}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <TextField size='small' label='Spot price' value={n.spot} onChange={e=> setNewLegDrafts(a=> a.map((x,i)=> i===idx ? { ...x, spot: e.target.value } : x))} fullWidth />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField size='small' label='Lots' type='number' value={n.lots} onChange={e=> setNewLegDrafts(a=> a.map((x,i)=> i===idx ? { ...x, lots: e.target.value } : x))} inputProps={{ min:1, step:1 }} fullWidth />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <FormControl fullWidth size='small'>
+                      <InputLabel id={`adj-type-${idx}`}>Type</InputLabel>
+                      <Select labelId={`adj-type-${idx}`} label='Type' value={n.type} onChange={e=> setNewLegDrafts(a=> a.map((x,i)=> i===idx ? { ...x, type: e.target.value as any } : x))}>
+                        <MenuItem value='CE'>CE</MenuItem>
+                        <MenuItem value='PE'>PE</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <FormControl fullWidth size='small'>
+                      <InputLabel id={`adj-act-${idx}`}>Action</InputLabel>
+                      <Select labelId={`adj-act-${idx}`} label='Action' value={n.action} onChange={e=> setNewLegDrafts(a=> a.map((x,i)=> i===idx ? { ...x, action: e.target.value as any } : x))}>
+                        <MenuItem value='B'>BUY</MenuItem>
+                        <MenuItem value='S'>SELL</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+              ))}
+              <Box sx={{ display:'flex', gap:1 }}>
+                <Button size='small' variant='outlined' disabled={(positions.find(p=>p.id===selectedId)?.legs.length||0) <= newLegDrafts.length} onClick={()=> setNewLegDrafts(a=> [...a, { expiry: (positions.find(p=>p.id===selectedId)?.expiry)||'', spot:'', lots:'1', type:'CE', action:'B' }])}>Add leg</Button>
+                <Button size='small' variant='outlined' disabled={newLegDrafts.length===0} onClick={()=> setNewLegDrafts(a=> a.slice(0, -1))}>Remove last</Button>
+              </Box>
+              <Box sx={{ display:'flex', gap:1, mt:1 }}>
+                <Button variant='contained' color='primary' onClick={executeAdjustment}>EXECUTE adjustment</Button>
+                <Button variant='text' onClick={()=> setAdjustTradeOpen(false)}>Cancel</Button>
+              </Box>
+            </Box>
+          </Drawer>
       </Paper>
 
       <Drawer anchor='right' open={adjustOpen} onClose={()=>setAdjustOpen(false)}>
